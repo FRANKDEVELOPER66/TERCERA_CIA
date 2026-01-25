@@ -21,9 +21,16 @@ class Grados extends ActiveRecord
         $this->orden = $args['orden'] ?? '';
     }
 
+
     public static function obtenerGrados()
     {
-        $sql = "SELECT * FROM bhr_grados ORDER BY tipo, orden";
+        $sql = "SELECT * FROM bhr_grados ORDER BY orden ASC";
         return self::fetchArray($sql);
+    }
+
+    public static function obtenerPorTipo($tipo)
+    {
+        $sql = "SELECT * FROM bhr_grados WHERE tipo = :tipo ORDER BY orden ASC";
+        return self::fetchArray($sql, [':tipo' => $tipo]);
     }
 }

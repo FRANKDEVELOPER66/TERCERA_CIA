@@ -23,7 +23,13 @@ class GruposDescanso extends ActiveRecord
 
     public static function obtenerGrupos()
     {
-        $sql = "SELECT * FROM grupos_descanso ORDER BY tipo, nombre";
+        $sql = "SELECT * FROM grupos_descanso ORDER BY tipo, nombre ASC";
         return self::fetchArray($sql);
+    }
+
+    public static function obtenerPorTipo($tipo)
+    {
+        $sql = "SELECT * FROM grupos_descanso WHERE tipo = :tipo ORDER BY nombre ASC";
+        return self::fetchArray($sql, [':tipo' => $tipo]);
     }
 }
