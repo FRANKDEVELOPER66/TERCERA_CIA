@@ -23,7 +23,9 @@ class AsignacionController
     public static function generarSemanaAPI()
     {
         header('Content-Type: application/json; charset=UTF-8');
-        
+
+        $debug = []; // Array para debug
+        $debug['paso_1'] = 'Iniciando proceso';
 
         $fecha_inicio = $_POST['fecha_inicio'] ?? '';
 
@@ -32,10 +34,12 @@ class AsignacionController
             echo json_encode([
                 'codigo' => 0,
                 'mensaje' => 'Debe proporcionar una fecha de inicio',
+                'debug' => $debug
             ], JSON_UNESCAPED_UNICODE);
             return;
         }
-        
+
+        $debug['paso_2'] = 'Fecha recibida: ' . $fecha_inicio;
 
         try {
             // Validar que sea lunes
@@ -45,35 +49,52 @@ class AsignacionController
                 echo json_encode([
                     'codigo' => 0,
                     'mensaje' => 'La fecha debe ser un LUNES',
+                    'debug' => $debug
                 ], JSON_UNESCAPED_UNICODE);
                 return;
             }
 
+            $debug['paso_3'] = 'Fecha validada como lunes';
+
             // Generar asignaciones
-            $usuario_id = $_SESSION['user_id'] ?? null; // Si usas sesiones
+            $usuario_id = $_SESSION['user_id'] ?? null;
+            $debug['paso_4'] = 'Usuario ID: ' . ($usuario_id ?? 'NULL');
+
             $resultado = AsignacionServicio::generarAsignacionesSemanal($fecha_inicio, $usuario_id);
+
+            $debug['paso_5'] = 'Resultado de generación';
+            $debug['resultado_completo'] = $resultado;
 
             if ($resultado['exito']) {
                 http_response_code(200);
                 echo json_encode([
                     'codigo' => 1,
                     'mensaje' => $resultado['mensaje'],
-                    'datos' => $resultado['asignaciones']
+                    'datos' => $resultado['asignaciones'],
+                    'total_generadas' => count($resultado['asignaciones']),
+                    'debug' => $debug
                 ], JSON_UNESCAPED_UNICODE);
             } else {
                 http_response_code(400);
                 echo json_encode([
                     'codigo' => 0,
                     'mensaje' => $resultado['mensaje'],
-                    'errores' => $resultado['errores']
+                    'errores' => $resultado['errores'],
+                    'debug' => $debug
                 ], JSON_UNESCAPED_UNICODE);
             }
         } catch (Exception $e) {
+            $debug['paso_error'] = 'Excepción capturada';
+            $debug['error_mensaje'] = $e->getMessage();
+            $debug['error_linea'] = $e->getLine();
+            $debug['error_archivo'] = $e->getFile();
+
             http_response_code(500);
             echo json_encode([
                 'codigo' => 0,
                 'mensaje' => 'Error al generar asignaciones',
                 'detalle' => $e->getMessage(),
+                'debug' => $debug
             ], JSON_UNESCAPED_UNICODE);
         }
     }

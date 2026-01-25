@@ -44,50 +44,6 @@ class AsignacionServicio extends ActiveRecord
     }
 
     /**
-     * Genera asignaciones para una semana completa (Lunes a Domingo)
-     */
-    public static function generarAsignacionesSemanal($fecha_inicio, $usuario_id = null)
-    {
-        $resultado = [
-            'exito' => false,
-            'mensaje' => '',
-            'asignaciones' => [],
-            'errores' => []
-        ];
-
-        try {
-            // Verificar que sea lunes
-            $fecha = new \DateTime($fecha_inicio);
-            if ($fecha->format('N') != 1) {
-                $resultado['mensaje'] = 'La fecha debe ser un lunes';
-                return $resultado;
-            }
-
-            $asignaciones_creadas = [];
-
-            // Generar para 7 días (lunes a domingo)
-            for ($dia = 0; $dia < 7; $dia++) {
-                $fecha_servicio = clone $fecha;
-                $fecha_servicio->modify("+{$dia} days");
-                $fecha_str = $fecha_servicio->format('Y-m-d');
-
-                // Generar cada tipo de servicio para este día
-                $servicios_dia = self::generarServiciosPorDia($fecha_str, $usuario_id);
-                $asignaciones_creadas = array_merge($asignaciones_creadas, $servicios_dia);
-            }
-
-            $resultado['exito'] = true;
-            $resultado['mensaje'] = 'Asignaciones generadas exitosamente';
-            $resultado['asignaciones'] = $asignaciones_creadas;
-
-            return $resultado;
-        } catch (\Exception $e) {
-            $resultado['mensaje'] = 'Error al generar asignaciones: ' . $e->getMessage();
-            return $resultado;
-        }
-    }
-
-    /**
      * Genera todos los servicios para un día específico
      */
     private static function generarServiciosPorDia($fecha, $usuario_id = null)
@@ -375,6 +331,70 @@ class AsignacionServicio extends ActiveRecord
     /**
      * Crea una asignación de servicio
      */
+    /**
+     * Genera asignaciones para una semana completa (Lunes a Domingo)
+     */
+    public static function generarAsignacionesSemanal($fecha_inicio, $usuario_id = null)
+    {
+        $resultado = [
+            'exito' => false,
+            'mensaje' => '',
+            'asignaciones' => [],
+            'errores' => [],
+            'debug' => [] // Agregar array de debug
+        ];
+
+        try {
+            $resultado['debug']['paso_1'] = 'Validando fecha';
+
+            // Verificar que sea lunes
+            $fecha = new \DateTime($fecha_inicio);
+            if ($fecha->format('N') != 1) {
+                $resultado['mensaje'] = 'La fecha debe ser un lunes';
+                $resultado['debug']['error'] = 'No es lunes';
+                return $resultado;
+            }
+
+            $resultado['debug']['paso_2'] = 'Fecha validada, iniciando generación';
+            $asignaciones_creadas = [];
+
+            // Generar para 7 días (lunes a domingo)
+            for ($dia = 0; $dia < 7; $dia++) {
+                $fecha_servicio = clone $fecha;
+                $fecha_servicio->modify("+{$dia} days");
+                $fecha_str = $fecha_servicio->format('Y-m-d');
+
+                $resultado['debug']["dia_{$dia}"] = "Generando para: {$fecha_str}";
+
+                // Generar cada tipo de servicio para este día
+                $servicios_dia = self::generarServiciosPorDia($fecha_str, $usuario_id);
+
+                $resultado['debug']["dia_{$dia}_generados"] = count($servicios_dia);
+
+                $asignaciones_creadas = array_merge($asignaciones_creadas, $servicios_dia);
+            }
+
+            $resultado['debug']['paso_3'] = 'Total asignaciones creadas: ' . count($asignaciones_creadas);
+
+            $resultado['exito'] = true;
+            $resultado['mensaje'] = 'Asignaciones generadas exitosamente';
+            $resultado['asignaciones'] = $asignaciones_creadas;
+
+            return $resultado;
+        } catch (\Exception $e) {
+            $resultado['mensaje'] = 'Error al generar asignaciones: ' . $e->getMessage();
+            $resultado['debug']['excepcion'] = [
+                'mensaje' => $e->getMessage(),
+                'linea' => $e->getLine(),
+                'archivo' => $e->getFile()
+            ];
+            return $resultado;
+        }
+    }
+
+    /**
+     * Crea una asignación de servicio
+     */
     private static function crearAsignacion($id_personal, $nombre_servicio, $fecha, $hora_inicio, $hora_fin, $usuario_id)
     {
         try {
@@ -384,7 +404,12 @@ class AsignacionServicio extends ActiveRecord
                 [':nombre' => $nombre_servicio]
             );
 
-            if (!$tipo_servicio) return null;
+            if (!$tipo_servicio) {
+                return [
+                    'error' => true,
+                    'mensaje' => "Tipo de servicio no encontrado: {$nombre_servicio}"
+                ];
+            }
 
             $asignacion = new self([
                 'id_personal' => $id_personal,
@@ -398,13 +423,30 @@ class AsignacionServicio extends ActiveRecord
 
             $resultado = $asignacion->crear();
 
+            // Retornar info de debug
+            $asignacion->debug_info = [
+                'id_personal' => $id_personal,
+                'servicio' => $nombre_servicio,
+                'fecha' => $fecha,
+                'resultado_crear' => $resultado,
+                'atributos' => $asignacion->atributos()
+            ];
+
+            if ($resultado['resultado'] === false || $resultado['resultado'] === 0) {
+                $asignacion->debug_info['error'] = 'No se pudo crear en BD';
+                return $asignacion;
+            }
+
             // Actualizar historial de rotaciones
             self::actualizarHistorial($id_personal, $tipo_servicio['id_tipo_servicio'], $fecha);
 
             return $asignacion;
         } catch (\Exception $e) {
-            error_log("Error creando asignación: " . $e->getMessage());
-            return null;
+            return [
+                'error' => true,
+                'mensaje' => $e->getMessage(),
+                'linea' => $e->getLine()
+            ];
         }
     }
 
@@ -453,22 +495,31 @@ class AsignacionServicio extends ActiveRecord
     /**
      * Obtiene asignaciones de una semana para mostrar
      */
+    /**
+     * Obtiene asignaciones de una semana para mostrar
+     */
     public static function obtenerAsignacionesSemana($fecha_inicio)
     {
         $fecha_fin = date('Y-m-d', strtotime($fecha_inicio . ' +6 days'));
 
         $sql = "SELECT 
-                    a.*,
-                    CONCAT(p.nombres, ' ', p.apellidos) as nombre_completo,
-                    g.nombre as grado,
-                    ts.nombre as servicio,
-                    ts.tipo_personal
-                FROM asignaciones_servicio a
-                INNER JOIN bhr_personal p ON a.id_personal = p.id_personal
-                INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-                INNER JOIN tipos_servicio ts ON a.id_tipo_servicio = ts.id_tipo_servicio
-                WHERE a.fecha_servicio BETWEEN :inicio AND :fin
-                ORDER BY a.fecha_servicio, ts.prioridad_asignacion, g.orden";
+                a.*,
+                CONCAT(p.nombres, ' ', p.apellidos) as nombre_completo,
+                g.nombre as grado,
+                ts.nombre as servicio,
+                ts.tipo_personal,
+                -- Agregar el oficial encargado
+                CONCAT(oficial.nombres, ' ', oficial.apellidos) as oficial_encargado,
+                g_oficial.nombre as grado_oficial
+            FROM asignaciones_servicio a
+            INNER JOIN bhr_personal p ON a.id_personal = p.id_personal
+            INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+            INNER JOIN tipos_servicio ts ON a.id_tipo_servicio = ts.id_tipo_servicio
+            -- JOIN para el oficial encargado (LEFT porque puede ser NULL)
+            LEFT JOIN bhr_personal oficial ON a.id_oficial_encargado = oficial.id_personal
+            LEFT JOIN bhr_grados g_oficial ON oficial.id_grado = g_oficial.id_grado
+            WHERE a.fecha_servicio BETWEEN :inicio AND :fin
+            ORDER BY a.fecha_servicio, ts.prioridad_asignacion, g.orden";
 
         return self::fetchArray($sql, [
             ':inicio' => $fecha_inicio,

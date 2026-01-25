@@ -123,16 +123,31 @@ class ActiveRecord
         $query .= join(", ", array_values($atributos));
         $query .= " ) ";
 
+        // AGREGAR LOGGING
+        error_log("=== CREAR REGISTRO ===");
+        error_log("Tabla: " . static::$tabla);
+        error_log("Query: " . $query);
+        error_log("Atributos: " . print_r($atributos, true));
 
-        // debuguear($query);
+        try {
+            // Resultado de la consulta
+            $resultado = self::$db->exec($query);
 
-        // Resultado de la consulta
-        $resultado = self::$db->exec($query);
+            error_log("Resultado exec: " . ($resultado !== false ? 'true' : 'false'));
+            error_log("Last Insert ID: " . self::$db->lastInsertId());
 
-        return [
-            'resultado' =>  $resultado,
-            'id' => self::$db->lastInsertId(static::$tabla)
-        ];
+            return [
+                'resultado' =>  $resultado,
+                'id' => self::$db->lastInsertId()
+            ];
+        } catch (\PDOException $e) {
+            error_log("ERROR PDO en crear(): " . $e->getMessage());
+            return [
+                'resultado' => false,
+                'id' => null,
+                'error' => $e->getMessage()
+            ];
+        }
     }
 
     public function actualizar()
@@ -170,7 +185,7 @@ class ActiveRecord
             'resultado' =>  $resultado,
         ];
     }
-    
+
     // Eliminar un registro - Toma el ID de Active Record
     public function eliminar()
     {
@@ -246,7 +261,14 @@ class ActiveRecord
         $atributos = [];
         foreach (static::$columnasDB as $columna) {
             $columna = strtolower($columna);
-            if ($columna === 'id' || $columna === static::$idTabla) continue;
+            // No excluir el ID de la tabla si es NULL (para auto-increment)
+            if ($columna === 'id') continue;
+
+            // Solo excluir si es el ID específico de la tabla Y no es NULL
+            if ($columna === static::$idTabla && !is_null($this->$columna)) {
+                continue;
+            }
+
             $atributos[$columna] = $this->$columna;
         }
         return $atributos;
@@ -256,9 +278,16 @@ class ActiveRecord
     {
         $atributos = $this->atributos();
         $sanitizado = [];
+
         foreach ($atributos as $key => $value) {
-            $sanitizado[$key] = self::$db->quote($value);
+            // Si el valor es NULL, mantenerlo como NULL (no como cadena)
+            if ($value === null || $value === '') {
+                $sanitizado[$key] = 'NULL';
+            } else {
+                $sanitizado[$key] = self::$db->quote($value);
+            }
         }
+
         return $sanitizado;
     }
 
@@ -268,6 +297,27 @@ class ActiveRecord
             if (property_exists($this, $key) && !is_null($value)) {
                 $this->$key = $value;
             }
+        }
+    }
+
+    // Agregar este método a la clase ActiveRecord
+    public static function ejecutarQuery($sql, $params = [])
+    {
+        try {
+            $stmt = self::$db->prepare($sql);
+
+            foreach ($params as $key => $value) {
+                $stmt->bindValue($key, $value);
+            }
+
+            $resultado = $stmt->execute();
+
+            return $resultado;
+        } catch (\PDOException $e) {
+            error_log("Error en ejecutarQuery: " . $e->getMessage());
+            error_log("SQL: " . $sql);
+            error_log("Params: " . print_r($params, true));
+            return false;
         }
     }
 }

@@ -93,7 +93,18 @@ const generarServicios = async () => {
         };
 
         const respuesta = await fetch(url, config);
-        const data = await respuesta.json();
+        //const data = await respuesta.json();
+
+        const text = await respuesta.text();
+        console.log('RESPUESTA RAW DEL SERVIDOR:', text);
+
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            throw new Error('La respuesta NO es JSON, revisa la consola');
+        }
+
 
         mostrarLoading(false);
 
