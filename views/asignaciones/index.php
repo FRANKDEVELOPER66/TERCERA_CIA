@@ -22,6 +22,37 @@
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
     }
 
+    .official-day-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 10px;
+        margin-top: 0.5rem;
+        font-size: 0.95rem;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    }
+
+    .official-day-badge i {
+        font-size: 1.1rem;
+    }
+
+    .official-badge {
+        background: rgba(255, 255, 255, 0.3);
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .official-badge i {
+        margin-right: 0.5rem;
+    }
+
     .service-card h4 {
         margin: 0 0 1rem 0;
         font-weight: 700;

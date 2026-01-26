@@ -42,7 +42,6 @@ class AsignacionServicio extends ActiveRecord
         $this->observaciones = $args['observaciones'] ?? '';
         $this->created_by = $args['created_by'] ?? null;
     }
-
     /**
      * Genera todos los servicios para un día específico
      */
@@ -50,24 +49,28 @@ class AsignacionServicio extends ActiveRecord
     {
         $asignaciones = [];
 
+        // Obtener oficial encargado del día
+        $oficial = self::obtenerOficialDisponible($fecha);
+        $id_oficial = $oficial ? $oficial['id_personal'] : null;
+
         // 1. TÁCTICO - 1 especialista
-        $tactico = self::asignarTactico($fecha, $usuario_id);
+        $tactico = self::asignarTactico($fecha, $usuario_id, $id_oficial);
         if ($tactico) $asignaciones[] = $tactico;
 
         // 2. RECONOCIMIENTO - 3 especialistas + 4 soldados
-        $reconocimiento = self::asignarReconocimiento($fecha, $usuario_id);
+        $reconocimiento = self::asignarReconocimiento($fecha, $usuario_id, $id_oficial);
         $asignaciones = array_merge($asignaciones, $reconocimiento);
 
         // 3. SERVICIO NOCTURNO - 4 soldados (del día anterior)
-        $nocturno = self::asignarServicioNocturno($fecha, $usuario_id);
+        $nocturno = self::asignarServicioNocturno($fecha, $usuario_id, $id_oficial);
         $asignaciones = array_merge($asignaciones, $nocturno);
 
         // 4. BANDERÍN - Sargentos
-        $banderin = self::asignarBanderin($fecha, $usuario_id);
+        $banderin = self::asignarBanderin($fecha, $usuario_id, $id_oficial);
         if ($banderin) $asignaciones[] = $banderin;
 
         // 5. CUARTELERO - Sargentos y Cabos
-        $cuartelero = self::asignarCuartelero($fecha, $usuario_id);
+        $cuartelero = self::asignarCuartelero($fecha, $usuario_id, $id_oficial);
         if ($cuartelero) $asignaciones[] = $cuartelero;
 
         return $asignaciones;
@@ -76,27 +79,26 @@ class AsignacionServicio extends ActiveRecord
     /**
      * Asigna servicio TÁCTICO (1 especialista disponible)
      */
-    private static function asignarTactico($fecha, $usuario_id)
+    private static function asignarTactico($fecha, $usuario_id, $id_oficial = null)
     {
         $sql = "SELECT p.id_personal
-                FROM bhr_personal p
-                LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-    AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-
-                LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-                    AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TÁCTICO')
-                WHERE p.tipo = 'ESPECIALISTA'
-                    AND p.activo = 1
-                    AND cd.id_calendario IS NULL -- No está de descanso
-                    AND p.id_personal NOT IN (
-                        SELECT id_personal FROM asignaciones_servicio 
-                        WHERE fecha_servicio = :fecha2
-                    )
-                ORDER BY 
-                    COALESCE(hr.dias_desde_ultimo, 999) DESC,
-                    COALESCE(hr.prioridad, 0) ASC,
-                    RAND()
-                LIMIT 1";
+            FROM bhr_personal p
+            LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+                AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+            LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+                AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TÁCTICO')
+            WHERE p.tipo = 'ESPECIALISTA'
+                AND p.activo = 1
+                AND cd.id_calendario IS NULL
+                AND p.id_personal NOT IN (
+                    SELECT id_personal FROM asignaciones_servicio 
+                    WHERE fecha_servicio = :fecha2
+                )
+            ORDER BY 
+                COALESCE(hr.dias_desde_ultimo, 999) DESC,
+                COALESCE(hr.prioridad, 0) ASC,
+                RAND()
+            LIMIT 1";
 
         $params = [':fecha' => $fecha, ':fecha2' => $fecha];
         $resultado = self::fetchFirst($sql, $params);
@@ -108,7 +110,8 @@ class AsignacionServicio extends ActiveRecord
                 $fecha,
                 '00:00:00',
                 '23:59:59',
-                $usuario_id
+                $usuario_id,
+                $id_oficial // <-- AGREGAR ESTE PARÁMETRO
             );
         }
 
@@ -118,7 +121,7 @@ class AsignacionServicio extends ActiveRecord
     /**
      * Asigna RECONOCIMIENTO (3 especialistas + 4 soldados)
      */
-    private static function asignarReconocimiento($fecha, $usuario_id)
+    private static function asignarReconocimiento($fecha, $usuario_id, $id_oficial = null)
     {
         $asignaciones = [];
 
@@ -131,12 +134,13 @@ class AsignacionServicio extends ActiveRecord
                 $fecha,
                 '06:00:00',
                 '18:00:00',
-                $usuario_id
+                $usuario_id,
+                $id_oficial // <-- AGREGAR
             );
             if ($asignacion) $asignaciones[] = $asignacion;
         }
 
-        // 4 Soldados (excluir los del nocturno del día anterior)
+        // 4 Soldados
         $fecha_anterior = date('Y-m-d', strtotime($fecha . ' -1 day'));
         $soldados = self::obtenerPersonalDisponible($fecha, 'TROPA', 4, 'RECONOCIMIENTO', $fecha_anterior);
         foreach ($soldados as $sold) {
@@ -146,7 +150,8 @@ class AsignacionServicio extends ActiveRecord
                 $fecha,
                 '06:00:00',
                 '18:00:00',
-                $usuario_id
+                $usuario_id,
+                $id_oficial // <-- AGREGAR
             );
             if ($asignacion) $asignaciones[] = $asignacion;
         }
@@ -157,7 +162,7 @@ class AsignacionServicio extends ActiveRecord
     /**
      * Asigna SERVICIO NOCTURNO (4 soldados)
      */
-    private static function asignarServicioNocturno($fecha, $usuario_id)
+    private static function asignarServicioNocturno($fecha, $usuario_id, $id_oficial = null)
     {
         $asignaciones = [];
         $soldados = self::obtenerPersonalDisponible($fecha, 'TROPA', 4, 'SERVICIO NOCTURNO');
@@ -169,12 +174,13 @@ class AsignacionServicio extends ActiveRecord
                 $fecha,
                 '18:00:00',
                 '06:00:00',
-                $usuario_id
+                $usuario_id,
+                $id_oficial // <-- AGREGAR
             );
             if ($asignacion) {
                 $asignaciones[] = $asignacion;
 
-                // Crear exclusión para que no vaya a reconocimiento al día siguiente
+                // Crear exclusión
                 $fecha_siguiente = date('Y-m-d', strtotime($fecha . ' +1 day'));
                 self::crearExclusion($sold['id_personal'], 'RECONOCIMIENTO', $fecha_siguiente, 'Servicio nocturno previo');
             }
@@ -186,29 +192,28 @@ class AsignacionServicio extends ActiveRecord
     /**
      * Asigna BANDERÍN (solo Sargentos)
      */
-    private static function asignarBanderin($fecha, $usuario_id)
+    private static function asignarBanderin($fecha, $usuario_id, $id_oficial = null)
     {
         $sql = "SELECT p.id_personal
-                FROM bhr_personal p
-                INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-                LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-    AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-
-                LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-                    AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
-                WHERE p.tipo = 'TROPA'
-                    AND g.nombre LIKE 'Sargento%'
-                    AND p.activo = 1
-                    AND cd.id_calendario IS NULL
-                    AND p.id_personal NOT IN (
-                        SELECT id_personal FROM asignaciones_servicio 
-                        WHERE fecha_servicio = :fecha2
-                    )
-                ORDER BY 
-                    COALESCE(hr.dias_desde_ultimo, 999) DESC,
-                    g.orden ASC,
-                    RAND()
-                LIMIT 1";
+            FROM bhr_personal p
+            INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+            LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+                AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+            LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+                AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
+            WHERE p.tipo = 'TROPA'
+                AND g.nombre LIKE 'Sargento%'
+                AND p.activo = 1
+                AND cd.id_calendario IS NULL
+                AND p.id_personal NOT IN (
+                    SELECT id_personal FROM asignaciones_servicio 
+                    WHERE fecha_servicio = :fecha2
+                )
+            ORDER BY 
+                COALESCE(hr.dias_desde_ultimo, 999) DESC,
+                g.orden ASC,
+                RAND()
+            LIMIT 1";
 
         $params = [':fecha' => $fecha, ':fecha2' => $fecha];
         $resultado = self::fetchFirst($sql, $params);
@@ -220,7 +225,8 @@ class AsignacionServicio extends ActiveRecord
                 $fecha,
                 '00:00:00',
                 '23:59:59',
-                $usuario_id
+                $usuario_id,
+                $id_oficial // <-- AGREGAR
             );
         }
 
@@ -230,29 +236,28 @@ class AsignacionServicio extends ActiveRecord
     /**
      * Asigna CUARTELERO (Sargentos y Cabos)
      */
-    private static function asignarCuartelero($fecha, $usuario_id)
+    private static function asignarCuartelero($fecha, $usuario_id, $id_oficial = null)
     {
         $sql = "SELECT p.id_personal
-                FROM bhr_personal p
-                INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-                LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-    AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-
-                LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-                    AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-                WHERE p.tipo = 'TROPA'
-                    AND (g.nombre LIKE 'Sargento%' OR g.nombre LIKE 'Cabo%')
-                    AND p.activo = 1
-                    AND cd.id_calendario IS NULL
-                    AND p.id_personal NOT IN (
-                        SELECT id_personal FROM asignaciones_servicio 
-                        WHERE fecha_servicio = :fecha2
-                    )
-                ORDER BY 
-                    COALESCE(hr.dias_desde_ultimo, 999) DESC,
-                    g.orden ASC,
-                    RAND()
-                LIMIT 1";
+            FROM bhr_personal p
+            INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+            LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+                AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+            LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+                AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+            WHERE p.tipo = 'TROPA'
+                AND (g.nombre LIKE 'Sargento%' OR g.nombre LIKE 'Cabo%')
+                AND p.activo = 1
+                AND cd.id_calendario IS NULL
+                AND p.id_personal NOT IN (
+                    SELECT id_personal FROM asignaciones_servicio 
+                    WHERE fecha_servicio = :fecha2
+                )
+            ORDER BY 
+                COALESCE(hr.dias_desde_ultimo, 999) DESC,
+                g.orden ASC,
+                RAND()
+            LIMIT 1";
 
         $params = [':fecha' => $fecha, ':fecha2' => $fecha];
         $resultado = self::fetchFirst($sql, $params);
@@ -264,13 +269,13 @@ class AsignacionServicio extends ActiveRecord
                 $fecha,
                 '00:00:00',
                 '23:59:59',
-                $usuario_id
+                $usuario_id,
+                $id_oficial // <-- AGREGAR
             );
         }
 
         return null;
     }
-
     /**
      * Obtiene personal disponible para un servicio
      */
@@ -395,7 +400,7 @@ class AsignacionServicio extends ActiveRecord
     /**
      * Crea una asignación de servicio
      */
-    private static function crearAsignacion($id_personal, $nombre_servicio, $fecha, $hora_inicio, $hora_fin, $usuario_id)
+    private static function crearAsignacion($id_personal, $nombre_servicio, $fecha, $hora_inicio, $hora_fin, $usuario_id, $id_oficial = null)
     {
         try {
             // Obtener ID del tipo de servicio
@@ -414,6 +419,7 @@ class AsignacionServicio extends ActiveRecord
             $asignacion = new self([
                 'id_personal' => $id_personal,
                 'id_tipo_servicio' => $tipo_servicio['id_tipo_servicio'],
+                'id_oficial_encargado' => $id_oficial, // <-- USAR EL PARÁMETRO
                 'fecha_servicio' => $fecha,
                 'hora_inicio' => $hora_inicio,
                 'hora_fin' => $hora_fin,
@@ -423,18 +429,11 @@ class AsignacionServicio extends ActiveRecord
 
             $resultado = $asignacion->crear();
 
-            // Retornar info de debug
-            $asignacion->debug_info = [
-                'id_personal' => $id_personal,
-                'servicio' => $nombre_servicio,
-                'fecha' => $fecha,
-                'resultado_crear' => $resultado,
-                'atributos' => $asignacion->atributos()
-            ];
-
             if ($resultado['resultado'] === false || $resultado['resultado'] === 0) {
-                $asignacion->debug_info['error'] = 'No se pudo crear en BD';
-                return $asignacion;
+                return [
+                    'error' => true,
+                    'mensaje' => 'No se pudo crear en BD'
+                ];
             }
 
             // Actualizar historial de rotaciones
@@ -508,14 +507,12 @@ class AsignacionServicio extends ActiveRecord
                 g.nombre as grado,
                 ts.nombre as servicio,
                 ts.tipo_personal,
-                -- Agregar el oficial encargado
                 CONCAT(oficial.nombres, ' ', oficial.apellidos) as oficial_encargado,
                 g_oficial.nombre as grado_oficial
             FROM asignaciones_servicio a
             INNER JOIN bhr_personal p ON a.id_personal = p.id_personal
             INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
             INNER JOIN tipos_servicio ts ON a.id_tipo_servicio = ts.id_tipo_servicio
-            -- JOIN para el oficial encargado (LEFT porque puede ser NULL)
             LEFT JOIN bhr_personal oficial ON a.id_oficial_encargado = oficial.id_personal
             LEFT JOIN bhr_grados g_oficial ON oficial.id_grado = g_oficial.id_grado
             WHERE a.fecha_servicio BETWEEN :inicio AND :fin
@@ -541,5 +538,24 @@ class AsignacionServicio extends ActiveRecord
             ':inicio' => $fecha_inicio,
             ':fin' => $fecha_fin
         ]);
+    }
+
+    /**
+     * Obtiene el oficial de mayor grado disponible para un día
+     */
+    private static function obtenerOficialDisponible($fecha)
+    {
+        $sql = "SELECT p.id_personal, g.nombre as grado, g.orden
+            FROM bhr_personal p
+            INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+            LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+                AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+            WHERE p.tipo = 'OFICIAL'
+                AND p.activo = 1
+                AND cd.id_calendario IS NULL -- No está de descanso
+            ORDER BY g.orden ASC -- Orden más bajo = grado más alto
+            LIMIT 1";
+
+        return self::fetchFirst($sql, [':fecha' => $fecha]);
     }
 }

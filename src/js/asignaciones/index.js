@@ -230,14 +230,26 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
         const serviciosDelDia = serviciosPorDia[fecha];
         const serviciosAgrupados = agruparPorServicio(serviciosDelDia);
 
+        // Obtener el oficial del día (todos deberían tener el mismo)
+        const oficialDia = serviciosDelDia[0];
+
         html += `
             <div class="col-12">
                 <div class="day-card">
                     <div class="day-header">
-                        <h3>
-                            <i class="bi bi-calendar-day"></i> 
-                            ${formatearFecha(fecha)}
-                        </h3>
+                        <div>
+                            <h3>
+                                <i class="bi bi-calendar-day"></i> 
+                                ${formatearFecha(fecha)}
+                            </h3>
+                            ${oficialDia.oficial_encargado ? `
+                                <div class="official-day-badge">
+                                    <i class="bi bi-star-fill"></i>
+                                    <strong>Oficial del Día:</strong> 
+                                    ${oficialDia.grado_oficial} ${oficialDia.oficial_encargado}
+                                </div>
+                            ` : ''}
+                        </div>
                         <span class="badge bg-primary">${serviciosDelDia.length} asignaciones</span>
                     </div>
                     <div class="row">
