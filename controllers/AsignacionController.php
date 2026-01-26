@@ -358,7 +358,7 @@ class AsignacionController
             $nombre_mostrar = ($tipo_servicio === 'TACTICO') ? 'TÁCTICO' : $tipo_servicio;
 
             $html .= '
-            <div style="background: ' . $color . '; color: white; border-radius: 12px; padding: 15px; margin-bottom: 15px;">
+            <div style="background: ' . $color . '; color: white; border-radius: 12px; padding: 5px; margin-bottom: 15px;">
         <h3 style="margin: 0 0 10px 0; font-size: 18px;">🛡️ ' . strtoupper($nombre_mostrar) . '</h3>';
 
             foreach ($personal as $persona) {
