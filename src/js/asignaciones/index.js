@@ -202,9 +202,13 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
         return;
     }
 
+    // Separar SEMANA del resto
+    const serviciosSemana = asignaciones.filter(a => a.servicio === 'Semana');
+    const serviciosDiarios = asignaciones.filter(a => a.servicio !== 'Semana');
+
     // Agrupar por fecha
     const serviciosPorDia = {};
-    asignaciones.forEach(asig => {
+    serviciosDiarios.forEach(asig => {
         if (!serviciosPorDia[asig.fecha_servicio]) {
             serviciosPorDia[asig.fecha_servicio] = [];
         }
@@ -224,13 +228,56 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
     };
 
     // Generar HTML
-    let html = '<div class="row">';
+    let html = '';
+
+    // ============ SECCIÓN DE SEMANA (ARRIBA) ============
+    if (serviciosSemana.length > 0) {
+        html += `
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="week-service-card">
+                        <h3 class="week-title">
+                            <i class="bi bi-calendar-range"></i>
+                            Servicio Semanal (${formatearFecha(fechaInicio)} - ${formatearFecha(serviciosSemana[0].fecha_servicio)})
+                        </h3>
+        `;
+
+        serviciosSemana.forEach(s => {
+            html += `
+                <div class="semana-card">
+                    <div class="semana-header">
+                        <h4><i class="bi bi-shield-fill"></i> Semana</h4>
+                        <span class="badge bg-warning text-dark">7 días completos</span>
+                    </div>
+                    <div class="semana-content">
+                        <div class="personnel-item-semana">
+                            <div>
+                                <strong>${s.grado}</strong> ${s.nombre_completo}
+                            </div>
+                            <div class="text-muted">
+                                <i class="bi bi-clock"></i> Toda la semana
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // ============ SERVICIOS DIARIOS (ABAJO) ============
+    html += '<div class="row">';
 
     Object.keys(serviciosPorDia).sort().forEach(fecha => {
         const serviciosDelDia = serviciosPorDia[fecha];
         const serviciosAgrupados = agruparPorServicio(serviciosDelDia);
 
-        // Obtener el oficial del día (todos deberían tener el mismo)
+        // Obtener el oficial del día
         const oficialDia = serviciosDelDia[0];
 
         html += `

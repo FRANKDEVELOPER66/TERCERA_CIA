@@ -22,6 +22,10 @@
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
     }
 
+    .service-card.semana {
+        background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%);
+    }
+
     .official-day-badge {
         display: inline-flex;
         align-items: center;
@@ -95,6 +99,65 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
+    }
+
+
+    .week-service-card {
+        background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%);
+        border-radius: 20px;
+        padding: 2rem;
+        box-shadow: 0 5px 25px rgba(255, 94, 98, 0.3);
+        margin-bottom: 2rem;
+    }
+
+    .week-title {
+        color: white;
+        font-weight: 700;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .semana-card {
+        background: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(10px);
+        border-radius: 15px;
+        padding: 1.5rem;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .semana-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        color: white;
+    }
+
+    .semana-header h4 {
+        margin: 0;
+        font-weight: 700;
+    }
+
+    .semana-content {
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 10px;
+        padding: 1rem;
+    }
+
+    .personnel-item-semana {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .personnel-item-semana strong {
+        color: #ff5e62;
     }
 
     .day-card {
