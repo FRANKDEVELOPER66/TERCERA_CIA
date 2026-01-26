@@ -48,81 +48,52 @@ class AsignacionServicio extends ActiveRecord
     private static function generarServiciosPorDia($fecha, $usuario_id = null)
     {
         $asignaciones = [];
-
-        // Obtener oficial encargado del día
         $oficial = self::obtenerOficialDisponible($fecha);
         $id_oficial = $oficial ? $oficial['id_personal'] : null;
 
         error_log("🔷 === GENERANDO SERVICIOS PARA: {$fecha} ===");
-        error_log("Oficial encargado: " . ($id_oficial ?? 'NINGUNO'));
 
-        // 1. TÁCTICO - 1 especialista
+        // 1. TÁCTICO
         $tactico = self::asignarTactico($fecha, $usuario_id, $id_oficial);
         if ($tactico && !is_array($tactico)) {
             $asignaciones[] = $tactico;
-            error_log("✅ TÁCTICO asignado");
-        } elseif (is_array($tactico) && isset($tactico['error'])) {
-            error_log("❌ Error en TÁCTICO: " . $tactico['mensaje']);
         }
 
-        // 2. RECONOCIMIENTO - 2 especialistas + 4 soldados
+        // 2. RECONOCIMIENTO
         $reconocimiento = self::asignarReconocimiento($fecha, $usuario_id, $id_oficial);
         foreach ($reconocimiento as $rec) {
             if (!is_array($rec) || !isset($rec['error'])) {
                 $asignaciones[] = $rec;
             }
         }
-        error_log("✅ RECONOCIMIENTO asignado (" . count($reconocimiento) . " personas)");
 
-        // 3. SERVICIO NOCTURNO - 3 soldados
-        error_log("🌙 Intentando asignar SERVICIO NOCTURNO para fecha: {$fecha}");
-        $nocturno = self::asignarServicioNocturno($fecha, $usuario_id, $id_oficial);
-        error_log("🌙 Resultado nocturno: " . print_r($nocturno, true));
-        error_log("🌙 Count nocturno: " . count($nocturno));
-
-        foreach ($nocturno as $noc) {
-            if (!is_array($noc) || !isset($noc['error'])) {
-                $asignaciones[] = $noc;
-                error_log("✅ Nocturno agregado a asignaciones");
-            } else {
-                error_log("❌ Nocturno con error: " . print_r($noc, true));
-            }
-        }
-        error_log("✅ SERVICIO NOCTURNO procesado (" . count($nocturno) . " personas)");
-
-        // 4. BANDERÍN - Sargentos
+        // 3. BANDERÍN
         $banderin = self::asignarBanderin($fecha, $usuario_id, $id_oficial);
         if ($banderin && !is_array($banderin)) {
             $asignaciones[] = $banderin;
-            error_log("✅ BANDERÍN asignado");
-        } elseif (is_array($banderin) && isset($banderin['error'])) {
-            error_log("❌ Error en BANDERÍN: " . $banderin['mensaje']);
         }
 
-        // 5. CUARTELERO - Sargentos y Cabos
+        // 4. CUARTELERO ⬅️ ANTES DEL NOCTURNO
         $cuartelero = self::asignarCuartelero($fecha, $usuario_id, $id_oficial);
         if ($cuartelero && !is_array($cuartelero)) {
             $asignaciones[] = $cuartelero;
             error_log("✅ CUARTELERO asignado");
-        } elseif (is_array($cuartelero) && isset($cuartelero['error'])) {
-            error_log("❌ Error en CUARTELERO: " . $cuartelero['mensaje']);
         }
 
-        // 6. SEMANA - Sargento 1ro. (solo lunes)
+        // 5. SERVICIO NOCTURNO ⬅️ DESPUÉS DEL CUARTELERO
+        $nocturno = self::asignarServicioNocturno($fecha, $usuario_id, $id_oficial);
+        foreach ($nocturno as $noc) {
+            if (!is_array($noc) || !isset($noc['error'])) {
+                $asignaciones[] = $noc;
+            }
+        }
+        error_log("✅ SERVICIO NOCTURNO procesado (" . count($nocturno) . " personas)");
+
+        // 6. SEMANA (solo lunes)
         $semana = self::asignarSemana($fecha, $usuario_id, $id_oficial);
         if ($semana && !is_array($semana)) {
-            // Es un objeto AsignacionServicio exitoso
             $asignaciones[] = $semana;
-            error_log("✅ SEMANA asignado");
-        } elseif (is_array($semana) && isset($semana['error'])) {
-            // Es un array de error
-            error_log("❌ Error en SEMANA: " . $semana['mensaje']);
-        } elseif ($semana === null) {
-            // No se asignó (probablemente no es lunes)
-            error_log("ℹ️ SEMANA no asignado (no es lunes o no hay disponible)");
         }
-
-        error_log("🔷 Total asignaciones creadas para {$fecha}: " . count($asignaciones));
 
         return $asignaciones;
     }
@@ -271,58 +242,63 @@ class AsignacionServicio extends ActiveRecord
         error_log("🌙 === ASIGNANDO SERVICIO NOCTURNO ===");
         error_log("Fecha: {$fecha}, Semana: {$lunes_str} a {$fecha_domingo}");
 
-        // Solo Soldados para Servicio Nocturno
         $sql = "SELECT 
-            p.id_personal,
-            p.nombres,
-            p.apellidos,
-            g.nombre as grado,
-            
-            -- 1. Contar servicios NOCTURNOS esta semana
-            (SELECT COUNT(*) 
-             FROM asignaciones_servicio a_noc
-             INNER JOIN tipos_servicio ts_noc ON a_noc.id_tipo_servicio = ts_noc.id_tipo_servicio
-             WHERE a_noc.id_personal = p.id_personal 
-             AND a_noc.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
-             AND ts_noc.nombre = 'SERVICIO NOCTURNO'
-            ) as nocturnos_semana,
-            
-            -- 2. Días desde último nocturno
-            (SELECT DATEDIFF(:fecha_actual, MAX(a_last.fecha_servicio))
-             FROM asignaciones_servicio a_last
-             INNER JOIN tipos_servicio ts_last ON a_last.id_tipo_servicio = ts_last.id_tipo_servicio
-             WHERE a_last.id_personal = p.id_personal
-             AND ts_last.nombre = 'SERVICIO NOCTURNO'
-            ) as dias_ultimo_nocturno,
-            
-            -- 3. Total de servicios esta semana (todos los tipos)
-            (SELECT COUNT(*) 
-             FROM asignaciones_servicio a_total
-             WHERE a_total.id_personal = p.id_personal 
-             AND a_total.fecha_servicio BETWEEN :fecha_lunes_count2 AND :fecha_domingo_count2
-            ) as servicios_semana_total
-            
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        WHERE p.tipo = 'TROPA'
-            AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            AND p.id_personal NOT IN (
-                -- Excluir quien tiene SEMANA
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-        ORDER BY 
-            nocturnos_semana ASC,
-            COALESCE(dias_ultimo_nocturno, 999) DESC,
-            servicios_semana_total ASC,
-            g.orden ASC,
-            RAND()
-        LIMIT 3";
+        p.id_personal,
+        p.nombres,
+        p.apellidos,
+        g.nombre as grado,
+        
+        -- 1. Contar servicios NOCTURNOS esta semana
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_noc
+         INNER JOIN tipos_servicio ts_noc ON a_noc.id_tipo_servicio = ts_noc.id_tipo_servicio
+         WHERE a_noc.id_personal = p.id_personal 
+         AND a_noc.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
+         AND ts_noc.nombre = 'SERVICIO NOCTURNO'
+        ) as nocturnos_semana,
+        
+        -- 2. Días desde último nocturno
+        (SELECT DATEDIFF(:fecha_actual, MAX(a_last.fecha_servicio))
+         FROM asignaciones_servicio a_last
+         INNER JOIN tipos_servicio ts_last ON a_last.id_tipo_servicio = ts_last.id_tipo_servicio
+         WHERE a_last.id_personal = p.id_personal
+         AND ts_last.nombre = 'SERVICIO NOCTURNO'
+        ) as dias_ultimo_nocturno,
+        
+        -- 3. Total de servicios esta semana (todos los tipos)
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_total
+         WHERE a_total.id_personal = p.id_personal 
+         AND a_total.fecha_servicio BETWEEN :fecha_lunes_count2 AND :fecha_domingo_count2
+        ) as servicios_semana_total
+        
+    FROM bhr_personal p
+    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+    WHERE p.tipo = 'TROPA'
+        AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
+        AND p.activo = 1
+        AND cd.id_calendario IS NULL
+        AND p.id_personal NOT IN (
+            -- Excluir quien tiene SEMANA
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+        )
+        AND p.id_personal NOT IN (
+            -- ⬅️ NUEVA EXCLUSIÓN: Excluir quien es CUARTELERO ese día
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio = :fecha_cuartelero
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+        )
+    ORDER BY 
+        nocturnos_semana ASC,
+        COALESCE(dias_ultimo_nocturno, 999) DESC,
+        servicios_semana_total ASC,
+        g.orden ASC,
+        RAND()
+    LIMIT 3";
 
         $params = [
             ':fecha' => $fecha,
@@ -332,7 +308,8 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_lunes_count' => $lunes_str,
             ':fecha_domingo_count' => $fecha_domingo,
             ':fecha_lunes_count2' => $lunes_str,
-            ':fecha_domingo_count2' => $fecha_domingo
+            ':fecha_domingo_count2' => $fecha_domingo,
+            ':fecha_cuartelero' => $fecha // ⬅️ NUEVO PARÁMETRO
         ];
 
         error_log("🌙 SQL Params: " . print_r($params, true));
@@ -343,7 +320,7 @@ class AsignacionServicio extends ActiveRecord
 
         if (count($soldados) === 0) {
             error_log("⚠️ NO SE ENCONTRARON SOLDADOS DISPONIBLES PARA NOCTURNO");
-            return []; // Retornar array vacío, no null
+            return [];
         }
 
         // Asignar los 3 turnos
@@ -373,7 +350,7 @@ class AsignacionServicio extends ActiveRecord
 
         error_log("🌙 Total nocturnos asignados: " . count($asignaciones));
 
-        return $asignaciones; // Siempre retornar array
+        return $asignaciones;
     }
 
     /**
@@ -456,7 +433,18 @@ class AsignacionServicio extends ActiveRecord
         $lunes_str = $fecha_lunes->format('Y-m-d');
         $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
 
-        $sql = "SELECT p.id_personal
+        $sql = "SELECT p.id_personal,
+        -- Contar cuántas veces ha sido CUARTELERO esta semana
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_cua
+         INNER JOIN tipos_servicio ts_cua ON a_cua.id_tipo_servicio = ts_cua.id_tipo_servicio
+         WHERE a_cua.id_personal = p.id_personal 
+         AND a_cua.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
+         AND ts_cua.nombre = 'CUARTELERO'
+        ) as veces_cuartelero_semana,
+        
+        COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo
+        
     FROM bhr_personal p
     INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
     LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
@@ -468,20 +456,32 @@ class AsignacionServicio extends ActiveRecord
         AND p.activo = 1
         AND cd.id_calendario IS NULL
         AND p.id_personal NOT IN (
+            -- Excluir quien tiene SEMANA
             SELECT id_personal FROM asignaciones_servicio 
             WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
             AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
         )
+        AND p.id_personal NOT IN (
+            -- ⬅️ EXCLUSIÓN: No asignar si fue CUARTELERO en los últimos 2 días
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+        )
     ORDER BY 
-        COALESCE(hr.dias_desde_ultimo, 999) DESC,
+        veces_cuartelero_semana ASC,  -- ⬅️ Prioridad: quien menos veces ha sido cuartelero
+        dias_ultimo DESC,              -- ⬅️ Luego: quien tiene más días sin hacerlo
         g.orden ASC,
         RAND()
     LIMIT 1";
 
         $params = [
             ':fecha' => $fecha,
+            ':fecha2' => $fecha,
+            ':fecha3' => $fecha,
             ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo
+            ':fecha_domingo' => $fecha_domingo,
+            ':fecha_lunes_count' => $lunes_str,
+            ':fecha_domingo_count' => $fecha_domingo
         ];
 
         error_log("=== DEBUG asignarCuartelero ===");
@@ -490,6 +490,8 @@ class AsignacionServicio extends ActiveRecord
         $resultado = self::fetchFirst($sql, $params);
 
         if ($resultado) {
+            error_log("✅ CUARTELERO seleccionado: ID {$resultado['id_personal']} (Veces esta semana: {$resultado['veces_cuartelero_semana']}, Días desde último: {$resultado['dias_ultimo']})");
+
             return self::crearAsignacion(
                 $resultado['id_personal'],
                 'CUARTELERO',
@@ -501,6 +503,7 @@ class AsignacionServicio extends ActiveRecord
             );
         }
 
+        error_log("⚠️ NO se encontró CUARTELERO disponible para {$fecha}");
         return null;
     }
     /**
