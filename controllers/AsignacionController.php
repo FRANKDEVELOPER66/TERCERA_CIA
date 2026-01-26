@@ -313,23 +313,22 @@ class AsignacionController
         }
     }
 
-    // === GENERAR PÁGINA DE UN DÍA ===
     private static function generarPaginaDia($dia_nombre, $fecha_formateada, $oficial_dia, $servicios_agrupados)
     {
         $html = '
-        <div style="border-bottom: 3px solid #2d5016; padding-bottom: 10px; margin-bottom: 20px;">
-            <h2 style="color: #2d5016; margin: 0; text-align: center; font-size: 24px;">
-                3RA. CIA 2DO BTN BHR
-            </h2>
-            <h1 style="color: #ff7b00; margin: 10px 0; text-align: center; font-size: 20px;">
-                ' . strtoupper($dia_nombre) . ', ' . strtoupper($fecha_formateada) . '
-            </h1>';
+    <div style="border-bottom: 3px solid #2d5016; padding-bottom: 10px; margin-bottom: 20px;">
+        <h2 style="color: #2d5016; margin: 0; text-align: center; font-size: 24px;">
+            3RA. CIA 2DO BTN BHR
+        </h2>
+        <h1 style="color: #ff7b00; margin: 10px 0; text-align: center; font-size: 20px;">
+            ' . strtoupper($dia_nombre) . ', ' . strtoupper($fecha_formateada) . '
+        </h1>';
 
         if (!empty($oficial_dia)) {
             $html .= '
-            <div style="background: #2d5016; color: white; padding: 10px; border-radius: 8px; text-align: center; margin-top: 10px;">
-                <strong> OFICIAL DEL ENCARGADO:</strong> ' . htmlspecialchars($oficial_dia) . '
-            </div>';
+        <div style="background: #2d5016; color: white; padding: 10px; border-radius: 8px; text-align: center; margin-top: 10px;">
+            <strong> OFICIAL ENCARGADO:</strong> ' . htmlspecialchars($oficial_dia) . '
+        </div>';
         }
 
         $html .= '</div>';
@@ -354,18 +353,57 @@ class AsignacionController
             // ⬇️ Mostrar el nombre con acento para que se vea bonito
             $nombre_mostrar = ($tipo_servicio === 'TACTICO') ? 'TÁCTICO' : $tipo_servicio;
 
-            $html .= '
-            <div style="background: ' . $color . '; color: white; border-radius: 12px; padding: 5px; margin-bottom: 15px;">
-        <h3 style="margin: 0 0 10px 0; font-size: 18px;">🛡️ ' . strtoupper($nombre_mostrar) . '</h3>';
+            // ⬇️ AGREGAR "Y CUARTO TURNO" AL CUARTELERO
+            if ($tipo_servicio === 'CUARTELERO') {
+                $nombre_mostrar = 'CUARTELERO Y CUARTO TURNO';
+            }
 
-            foreach ($personal as $persona) {
-                $horario = $persona['hora_inicio'] . ' - ' . $persona['hora_fin'];
-                $html .= '
+            $html .= '
+        <div style="background: ' . $color . '; color: white; border-radius: 12px; padding: 5px; margin-bottom: 15px;">
+    <h3 style="margin: 0 0 10px 0; font-size: 18px;">🛡️ ' . strtoupper($nombre_mostrar) . '</h3>';
+
+            // ⬇️ SI ES SERVICIO NOCTURNO, ORDENAR Y NUMERAR
+            if ($tipo_servicio === 'SERVICIO NOCTURNO') {
+                // Ordenar por hora_inicio
+                usort($personal, function ($a, $b) {
+                    return strcmp($a['hora_inicio'], $b['hora_inicio']);
+                });
+
+                // Asignar turno según posición
+                $turnos = [' PRIMER TURNO', ' SEGUNDO TURNO', ' TERCER TURNO', ' CUARTO TURNO'];
+
+                foreach ($personal as $index => $persona) {
+                    $turno_texto = $turnos[$index] ?? '';
+
+                    // ⬇️ MOSTRAR GRADO + ESPECIALISTA (si aplica) + NOMBRE
+                    $grado_completo = htmlspecialchars($persona['grado']);
+                    if (!empty($persona['tipo_personal']) && $persona['tipo_personal'] === 'ESPECIALISTA') {
+                        $grado_completo .= ' ESPECIALISTA';
+                    }
+
+                    $html .= '
                 <div style="background: rgba(255,255,255,0.2); padding: 8px 12px; border-radius: 8px; margin-bottom: 5px;">
-                    <strong>' . htmlspecialchars($persona['grado']) . '</strong> ' .
-                    htmlspecialchars($persona['nombre_completo']) .
-                    ' <span style="float: right;">' . $horario . '</span>
+                    <strong>' . $grado_completo . '</strong> ' .
+                        htmlspecialchars($persona['nombre_completo']) .
+                        '<span style="float: right; font-weight: bold; font-size: 14px;">' .
+                        $turno_texto . '</span>
                 </div>';
+                }
+            } else {
+                // Para otros servicios, sin turno
+                foreach ($personal as $persona) {
+                    // ⬇️ MOSTRAR GRADO + ESPECIALISTA (si aplica) + NOMBRE
+                    $grado_completo = htmlspecialchars($persona['grado']);
+                    if (!empty($persona['tipo_personal']) && $persona['tipo_personal'] === 'ESPECIALISTA') {
+                        $grado_completo .= ' ESPECIALISTA';
+                    }
+
+                    $html .= '
+                <div style="background: rgba(255,255,255,0.2); padding: 8px 12px; border-radius: 8px; margin-bottom: 5px;">
+                    <strong>' . $grado_completo . '</strong> ' .
+                        htmlspecialchars($persona['nombre_completo']) . '
+                </div>';
+                }
             }
 
             $html .= '</div>';

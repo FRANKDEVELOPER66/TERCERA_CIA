@@ -1197,21 +1197,22 @@ class AsignacionServicio extends ActiveRecord
         $fecha_fin = date('Y-m-d', strtotime($fecha_inicio . ' +6 days'));
 
         $sql = "SELECT 
-                a.*,
-                CONCAT(p.nombres, ' ', p.apellidos) as nombre_completo,
-                g.nombre as grado,
-                ts.nombre as servicio,
-                ts.tipo_personal,
-                CONCAT(oficial.nombres, ' ', oficial.apellidos) as oficial_encargado,
-                g_oficial.nombre as grado_oficial
-            FROM asignaciones_servicio a
-            INNER JOIN bhr_personal p ON a.id_personal = p.id_personal
-            INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-            INNER JOIN tipos_servicio ts ON a.id_tipo_servicio = ts.id_tipo_servicio
-            LEFT JOIN bhr_personal oficial ON a.id_oficial_encargado = oficial.id_personal
-            LEFT JOIN bhr_grados g_oficial ON oficial.id_grado = g_oficial.id_grado
-            WHERE a.fecha_servicio BETWEEN :inicio AND :fin
-            ORDER BY a.fecha_servicio, ts.prioridad_asignacion, g.orden";
+            a.*,
+            CONCAT(p.nombres, ' ', p.apellidos) as nombre_completo,
+            p.tipo AS tipo_personal,
+            g.nombre as grado,
+            ts.nombre as servicio,
+            ts.tipo_personal as tipo_servicio_requerido,
+            CONCAT(oficial.nombres, ' ', oficial.apellidos) as oficial_encargado,
+            g_oficial.nombre as grado_oficial
+        FROM asignaciones_servicio a
+        INNER JOIN bhr_personal p ON a.id_personal = p.id_personal
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        INNER JOIN tipos_servicio ts ON a.id_tipo_servicio = ts.id_tipo_servicio
+        LEFT JOIN bhr_personal oficial ON a.id_oficial_encargado = oficial.id_personal
+        LEFT JOIN bhr_grados g_oficial ON oficial.id_grado = g_oficial.id_grado
+        WHERE a.fecha_servicio BETWEEN :inicio AND :fin
+        ORDER BY a.fecha_servicio, ts.prioridad_asignacion, g.orden";
 
         return self::fetchArray($sql, [
             ':inicio' => $fecha_inicio,
