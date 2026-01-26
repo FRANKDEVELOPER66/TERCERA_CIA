@@ -75,13 +75,20 @@ class AsignacionServicio extends ActiveRecord
         error_log("✅ RECONOCIMIENTO asignado (" . count($reconocimiento) . " personas)");
 
         // 3. SERVICIO NOCTURNO - 3 soldados
+        error_log("🌙 Intentando asignar SERVICIO NOCTURNO para fecha: {$fecha}");
         $nocturno = self::asignarServicioNocturno($fecha, $usuario_id, $id_oficial);
+        error_log("🌙 Resultado nocturno: " . print_r($nocturno, true));
+        error_log("🌙 Count nocturno: " . count($nocturno));
+
         foreach ($nocturno as $noc) {
             if (!is_array($noc) || !isset($noc['error'])) {
                 $asignaciones[] = $noc;
+                error_log("✅ Nocturno agregado a asignaciones");
+            } else {
+                error_log("❌ Nocturno con error: " . print_r($noc, true));
             }
         }
-        error_log("✅ SERVICIO NOCTURNO asignado (" . count($nocturno) . " personas)");
+        error_log("✅ SERVICIO NOCTURNO procesado (" . count($nocturno) . " personas)");
 
         // 4. BANDERÍN - Sargentos
         $banderin = self::asignarBanderin($fecha, $usuario_id, $id_oficial);
@@ -261,6 +268,9 @@ class AsignacionServicio extends ActiveRecord
         $lunes_str = $fecha_lunes->format('Y-m-d');
         $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
 
+        error_log("🌙 === ASIGNANDO SERVICIO NOCTURNO ===");
+        error_log("Fecha: {$fecha}, Semana: {$lunes_str} a {$fecha_domingo}");
+
         // Solo Soldados para Servicio Nocturno
         $sql = "SELECT 
             p.id_personal,
@@ -297,7 +307,7 @@ class AsignacionServicio extends ActiveRecord
         LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
             AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
         WHERE p.tipo = 'TROPA'
-            AND g.nombre IN ('Soldado de Primera', 'Soldado de Segunda')
+            AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
             AND p.activo = 1
             AND cd.id_calendario IS NULL
             AND p.id_personal NOT IN (
@@ -306,12 +316,11 @@ class AsignacionServicio extends ActiveRecord
                 WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
                 AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
             )
-            -- Permitir asignación aunque tenga otro servicio HOY
         ORDER BY 
-            nocturnos_semana ASC,                    -- 1. MENOS nocturnos esta semana
-            COALESCE(dias_ultimo_nocturno, 999) DESC, -- 2. Más días sin nocturno
-            servicios_semana_total ASC,               -- 3. Menos servicios en total
-            g.orden ASC,                              -- 4. Mayor grado primero
+            nocturnos_semana ASC,
+            COALESCE(dias_ultimo_nocturno, 999) DESC,
+            servicios_semana_total ASC,
+            g.orden ASC,
             RAND()
         LIMIT 3";
 
@@ -326,11 +335,22 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_domingo_count2' => $fecha_domingo
         ];
 
+        error_log("🌙 SQL Params: " . print_r($params, true));
+
         $soldados = self::fetchArray($sql, $params);
+
+        error_log("🌙 Soldados encontrados: " . count($soldados));
+
+        if (count($soldados) === 0) {
+            error_log("⚠️ NO SE ENCONTRARON SOLDADOS DISPONIBLES PARA NOCTURNO");
+            return []; // Retornar array vacío, no null
+        }
 
         // Asignar los 3 turnos
         $turno = 1;
         foreach ($soldados as $sold) {
+            error_log("🌙 Asignando turno {$turno}: {$sold['nombres']} {$sold['apellidos']}");
+
             $asignacion = self::crearAsignacion(
                 $sold['id_personal'],
                 'SERVICIO NOCTURNO',
@@ -341,15 +361,19 @@ class AsignacionServicio extends ActiveRecord
                 $id_oficial
             );
 
-            if ($asignacion) {
+            if ($asignacion && !is_array($asignacion)) {
                 $asignaciones[] = $asignacion;
                 error_log("✅ NOCTURNO Turno {$turno}: {$sold['nombres']} {$sold['apellidos']} (Nocturnos esta semana: {$sold['nocturnos_semana']})");
+            } elseif (is_array($asignacion) && isset($asignacion['error'])) {
+                error_log("❌ Error al crear nocturno turno {$turno}: " . $asignacion['mensaje']);
             }
 
             $turno++;
         }
 
-        return $asignaciones;
+        error_log("🌙 Total nocturnos asignados: " . count($asignaciones));
+
+        return $asignaciones; // Siempre retornar array
     }
 
     /**
