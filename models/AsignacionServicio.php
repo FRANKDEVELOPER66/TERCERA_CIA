@@ -429,7 +429,13 @@ class AsignacionServicio extends ActiveRecord
         )";
         }
 
-        $sql = "SELECT p.id_personal
+        $sql = "SELECT p.id_personal,
+            -- Contar cuántos servicios tiene esta semana
+            (SELECT COUNT(*) 
+             FROM asignaciones_servicio a_count 
+             WHERE a_count.id_personal = p.id_personal 
+             AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
+            ) as servicios_semana
         FROM bhr_personal p
         LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
             AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
@@ -453,7 +459,8 @@ class AsignacionServicio extends ActiveRecord
             )
             {$exclusion_sql}
         ORDER BY 
-            COALESCE(hr.dias_desde_ultimo, 999) DESC,
+            servicios_semana ASC,  -- ⬅️ PRIMERO: Los que tienen MENOS servicios esta semana
+            COALESCE(hr.dias_desde_ultimo, 999) DESC,  -- ⬅️ SEGUNDO: Tiempo sin hacer este servicio
             COALESCE(hr.prioridad, 0) ASC,
             RAND()
         LIMIT :cantidad";
@@ -467,7 +474,9 @@ class AsignacionServicio extends ActiveRecord
             ':servicio2' => $nombre_servicio,
             ':cantidad' => $cantidad,
             ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo
+            ':fecha_domingo' => $fecha_domingo,
+            ':fecha_lunes_count' => $lunes_str,
+            ':fecha_domingo_count' => $fecha_domingo
         ];
 
         if ($fecha_exclusion) {

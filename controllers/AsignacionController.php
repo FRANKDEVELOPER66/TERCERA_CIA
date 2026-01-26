@@ -383,12 +383,12 @@ class AsignacionController
         $fecha = new \DateTime($fecha_inicio);
 
         $html = '
-        <div style="text-align: center; margin-bottom: 20px;">
-            <h1 style="color: #2d5016; margin: 0;">CRONOGRAMA SEMANAL</h1>
-            <h3 style="color: #ff7b00; margin: 5px 0;">Semana del ' . $fecha->format('d/m/Y') . '</h3>
-        </div>';
+    <div style="text-align: center; margin-bottom: 20px;">
+        <h1 style="color: #2d5016; margin: 0;">CRONOGRAMA SEMANAL</h1>
+        <h3 style="color: #ff7b00; margin: 5px 0;">Semana del ' . $fecha->format('d/m/Y') . '</h3>
+    </div>';
 
-        // Agrupar por personal
+        // Agrupar por personal (permitir múltiples servicios por día)
         $personal_servicios = [];
 
         foreach ($asignaciones as $asig) {
@@ -399,82 +399,205 @@ class AsignacionController
                 $personal_servicios[$id] = [
                     'nombre' => $asig['nombre_completo'],
                     'grado' => $asig['grado'],
-                    'servicios' => array_fill(1, 7, '-')
+                    'servicios' => []
                 ];
+
+                // Inicializar cada día como array vacío
+                for ($d = 1; $d <= 7; $d++) {
+                    $personal_servicios[$id]['servicios'][$d] = [];
+                }
             }
 
-            // Abreviaturas
+            // Agregar servicio (puede haber varios por día)
             $abrev = self::getAbreviatura($asig['servicio']);
-            $personal_servicios[$id]['servicios'][$dia_num] = $abrev;
+
+            // Si es servicio nocturno, agregar número de turno
+            if ($asig['servicio'] === 'SERVICIO NOCTURNO') {
+                $turno = self::obtenerNumeroTurno($asig, $asignaciones);
+                $abrev = $abrev . $turno; // NOC1, NOC2, NOC3
+            }
+
+            $personal_servicios[$id]['servicios'][$dia_num][] = $abrev;
         }
+
+        // Primero obtener el tipo de cada persona (ESPECIALISTA o TROPA)
+        foreach ($personal_servicios as $id => &$persona) {
+            // Buscar el tipo en las asignaciones
+            foreach ($asignaciones as $asig) {
+                if ($asig['id_personal'] == $id) {
+                    $persona['tipo'] = $asig['tipo_personal'];
+                    break;
+                }
+            }
+
+            // Contar total de servicios
+            $total = 0;
+            foreach ($persona['servicios'] as $dia) {
+                $total += count($dia);
+            }
+            $persona['total_servicios'] = $total;
+        }
+        unset($persona); // Romper referencia
+
+        // Ordenar: 1) Por tipo (ESPECIALISTA primero), 2) Por grado, 3) Por total de servicios
+        uasort($personal_servicios, function ($a, $b) {
+            // 1. Primero ESPECIALISTAS
+            $tipo_a = $a['tipo'] ?? 'TROPA';
+            $tipo_b = $b['tipo'] ?? 'TROPA';
+
+            if ($tipo_a === 'ESPECIALISTA' && $tipo_b !== 'ESPECIALISTA') {
+                return -1; // a va primero
+            }
+            if ($tipo_a !== 'ESPECIALISTA' && $tipo_b === 'ESPECIALISTA') {
+                return 1; // b va primero
+            }
+
+            // 2. Si son del mismo tipo, ordenar por grado (orden en BD)
+            $orden_grados = [
+                'Soldado de Primera' => 1,
+                'Soldado de Segunda' => 2,
+                'Cabo' => 3,
+                'Sargento 2do.' => 4,
+                'Sargento 1ro.' => 5
+            ];
+
+            $grado_a = $orden_grados[$a['grado']] ?? 999;
+            $grado_b = $orden_grados[$b['grado']] ?? 999;
+
+            if ($grado_a !== $grado_b) {
+                return $grado_a - $grado_b; // Ascendente
+            }
+
+            // 3. Si tienen el mismo grado, ordenar por total de servicios (ascendente)
+            return $a['total_servicios'] - $b['total_servicios'];
+        });
 
         // Tabla
         $html .= '
-        <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
-            <thead>
-                <tr style="background: #2d5016; color: white;">
-                    <th style="border: 1px solid #ddd; padding: 8px; text-align: left; width: 35%;">NOMBRE</th>
-                    <th style="border: 1px solid #ddd; padding: 6px; text-align: center;">L</th>
-                    <th style="border: 1px solid #ddd; padding: 6px; text-align: center;">M</th>
-                    <th style="border: 1px solid #ddd; padding: 6px; text-align: center;">M</th>
-                    <th style="border: 1px solid #ddd; padding: 6px; text-align: center;">J</th>
-                    <th style="border: 1px solid #ddd; padding: 6px; text-align: center;">V</th>
-                    <th style="border: 1px solid #ddd; padding: 6px; text-align: center;">S</th>
-                    <th style="border: 1px solid #ddd; padding: 6px; text-align: center;">D</th>
-                </tr>
-            </thead>
-            <tbody>';
+    <table style="width: 100%; border-collapse: collapse; font-size: 9px;">
+        <thead>
+            <tr style="background: #2d5016; color: white;">
+                <th style="border: 1px solid #ddd; padding: 8px; text-align: left; width: 28%;">NOMBRE</th>
+                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">L</th>
+                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">M</th>
+                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">M</th>
+                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">J</th>
+                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">V</th>
+                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">S</th>
+                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">D</th>
+                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 7%;">TOTAL</th>
+            </tr>
+        </thead>
+        <tbody>';
 
         $contador = 0;
         foreach ($personal_servicios as $persona) {
             $bgColor = ($contador % 2 == 0) ? '#f8f9fa' : '#ffffff';
 
-            $html .= '
-            <tr style="background: ' . $bgColor . ';">
-                <td style="border: 1px solid #ddd; padding: 6px; font-weight: bold;">
-                    ' . htmlspecialchars($persona['grado'] . ' ' . $persona['nombre']) . '
-                </td>';
-
-            for ($dia = 1; $dia <= 7; $dia++) {
-                $servicio = $persona['servicios'][$dia];
-                $color = self::getColorAbreviatura($servicio);
-
-                $html .= '
-                <td style="border: 1px solid #ddd; padding: 6px; text-align: center; font-weight: bold; color: ' . $color . ';">
-                    ' . $servicio . '
-                </td>';
+            // Contar total de servicios
+            $total_servicios = 0;
+            foreach ($persona['servicios'] as $dia) {
+                $total_servicios += count($dia);
             }
 
-            $html .= '</tr>';
+            $html .= '
+        <tr style="background: ' . $bgColor . ';">
+            <td style="border: 1px solid #ddd; padding: 4px; font-weight: bold; font-size: 8px;">
+                ' . htmlspecialchars($persona['grado'] . ' ' . $persona['nombre']) . '
+            </td>';
+
+            for ($dia = 1; $dia <= 7; $dia++) {
+                $servicios_dia = $persona['servicios'][$dia];
+
+                if (empty($servicios_dia)) {
+                    $html .= '
+                <td style="border: 1px solid #ddd; padding: 4px; text-align: center; color: #ccc;">
+                    -
+                </td>';
+                } else {
+                    // Si tiene SEMANA, mostrar solo eso en grande
+                    if (in_array('SEM', $servicios_dia)) {
+                        $html .= '
+                    <td style="border: 1px solid #ddd; padding: 4px; text-align: center; font-weight: bold; color: #ff9966; font-size: 10px;">
+                        SEM
+                    </td>';
+                    } else {
+                        // Mostrar todos los servicios separados por línea
+                        $servicios_html = [];
+                        foreach ($servicios_dia as $serv) {
+                            $color = self::getColorAbreviatura($serv);
+                            $servicios_html[] = '<span style="color: ' . $color . '; font-weight: bold;">' . $serv . '</span>';
+                        }
+
+                        $html .= '
+                    <td style="border: 1px solid #ddd; padding: 4px; text-align: center; font-size: 8px; line-height: 1.3;">
+                        ' . implode('<br>', $servicios_html) . '
+                    </td>';
+                    }
+                }
+            }
+
+            // Columna de TOTAL
+            $html .= '
+            <td style="border: 1px solid #ddd; padding: 4px; text-align: center; font-weight: bold; background: #e8f5e9;">
+                ' . $total_servicios . '
+            </td>
+        </tr>';
+
             $contador++;
         }
 
         $html .= '
-            </tbody>
-        </table>';
+        </tbody>
+    </table>';
 
-        // Leyenda
+        // Leyenda mejorada
         $html .= '
-        <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-            <h4 style="margin: 0 0 10px 0;">LEYENDA</h4>
-            <table style="width: 100%; font-size: 10px;">
-                <tr>
-                    <td><strong style="color: #ff9966;">SEM</strong> = Semana</td>
-                    <td><strong style="color: #c85a28;">TAC</strong> = Táctico</td>
-                    <td><strong style="color: #2d5016;">REC</strong> = Reconocimiento</td>
-                    <td><strong style="color: #1a472a;">NOC</strong> = Servicio Nocturno</td>
-                </tr>
-                <tr>
-                    <td><strong style="color: #b8540f;">BAN</strong> = Banderín</td>
-                    <td><strong style="color: #3d6b1f;">CUA</strong> = Cuartelero</td>
-                    <td colspan="2"></td>
-                </tr>
-            </table>
-        </div>';
+    <div style="margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 8px;">
+        <h4 style="margin: 0 0 8px 0; font-size: 11px;">LEYENDA DE SERVICIOS</h4>
+        <table style="width: 100%; font-size: 9px;">
+            <tr>
+                <td><strong style="color: #ff9966;">SEM</strong> = Semana (toda la semana)</td>
+                <td><strong style="color: #c85a28;">TAC</strong> = Táctico</td>
+                <td><strong style="color: #2d5016;">REC</strong> = Reconocimiento</td>
+            </tr>
+            <tr>
+                <td><strong style="color: #1a472a;">NOC1/2/3</strong> = Servicio Nocturno (Turno 1, 2 o 3)</td>
+                <td><strong style="color: #b8540f;">BAN</strong> = Banderín</td>
+                <td><strong style="color: #3d6b1f;">CUA</strong> = Cuartelero</td>
+            </tr>
+        </table>
+    </div>';
 
         return $html;
     }
 
+
+
+    private static function obtenerNumeroTurno($asignacion_actual, $todas_asignaciones)
+    {
+        // Filtrar solo servicios nocturnos del mismo día
+        $nocturnos_dia = array_filter($todas_asignaciones, function ($asig) use ($asignacion_actual) {
+            return $asig['fecha_servicio'] === $asignacion_actual['fecha_servicio']
+                && $asig['servicio'] === 'SERVICIO NOCTURNO';
+        });
+
+        // Ordenar por id_asignacion (orden de creación)
+        usort($nocturnos_dia, function ($a, $b) {
+            return $a['id_asignacion'] - $b['id_asignacion'];
+        });
+
+        // Encontrar la posición (turno)
+        $turno = 1;
+        foreach ($nocturnos_dia as $nocturno) {
+            if ($nocturno['id_asignacion'] === $asignacion_actual['id_asignacion']) {
+                return $turno;
+            }
+            $turno++;
+        }
+
+        return 1; // Por defecto
+    }
     // === FUNCIONES AUXILIARES ===
     private static function getNombreDia($num)
     {
@@ -497,6 +620,9 @@ class AsignacionController
 
     private static function getColorAbreviatura($abrev)
     {
+        // Extraer las primeras 3 letras (NOC1 → NOC)
+        $servicio_base = substr($abrev, 0, 3);
+
         $colores = [
             'SEM' => '#ff9966',
             'TAC' => '#c85a28',
@@ -505,7 +631,8 @@ class AsignacionController
             'BAN' => '#b8540f',
             'CUA' => '#3d6b1f'
         ];
-        return $colores[$abrev] ?? '#000000';
+
+        return $colores[$servicio_base] ?? '#000000';
     }
 
     public static function debugAsignaciones(Router $router)
