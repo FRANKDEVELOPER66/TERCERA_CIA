@@ -93,9 +93,8 @@ const generarServicios = async () => {
         };
 
         const respuesta = await fetch(url, config);
-        //const data = await respuesta.json();
-
         const text = await respuesta.text();
+
         console.log('RESPUESTA RAW DEL SERVIDOR:', text);
 
         let data;
@@ -105,6 +104,30 @@ const generarServicios = async () => {
             throw new Error('La respuesta NO es JSON, revisa la consola');
         }
 
+        // ⬇️ MOSTRAR DEBUG EN CONSOLA
+        if (data.debug) {
+            console.log('=== DEBUG COMPLETO ===');
+            console.log(data.debug);
+
+            if (data.debug.logs) {
+                console.log('=== LOGS DE ASIGNACIÓN ===');
+                console.log(data.debug.logs);
+            }
+        }
+
+        // ⬇️ MOSTRAR ERRORES DETALLADOS
+        if (data.errores && data.errores.length > 0) {
+            console.log('=== ERRORES DETALLADOS ===');
+            data.errores.forEach(error => {
+                console.log(`Fecha: ${error.fecha}`);
+                console.log(`Error: ${error.error}`);
+
+                // Si el error tiene logs
+                if (error.logs) {
+                    console.log('Logs:', error.logs);
+                }
+            });
+        }
 
         mostrarLoading(false);
 
@@ -113,14 +136,15 @@ const generarServicios = async () => {
                 icon: 'success',
                 title: data.mensaje
             });
-
-            // Consultar y mostrar los datos generados
             consultarServicios();
         } else {
             Swal.fire({
                 icon: 'error',
                 title: 'Error',
-                text: data.mensaje
+                html: `
+                    <p>${data.mensaje}</p>
+                    <small>Revisa la consola del navegador (F12) para más detalles</small>
+                `
             });
         }
     } catch (error) {
