@@ -276,13 +276,13 @@
 
     /* Botones principales */
     .btn-primary-custom {
-        background: linear-gradient(135deg, #28a745, #218838);
-        color: white;
+        background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
+        /* Verde oscuro */
         border: none;
-        padding: 0.75rem 1.5rem;
+        color: white;
+        padding: 1rem 2rem;
         border-radius: 10px;
         font-weight: 600;
-        transition: all 0.3s ease;
     }
 
     .btn-primary-custom:hover {

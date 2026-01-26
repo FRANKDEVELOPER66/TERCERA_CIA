@@ -14,7 +14,8 @@
     }
 
     .service-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
+        /* Verde oscuro por defecto */
         color: white;
         border-radius: 15px;
         padding: 1.5rem;
@@ -30,13 +31,14 @@
         display: inline-flex;
         align-items: center;
         gap: 0.5rem;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
+        /* Verde oscuro */
         color: white;
         padding: 0.5rem 1rem;
         border-radius: 10px;
         margin-top: 0.5rem;
         font-size: 0.95rem;
-        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        box-shadow: 0 2px 8px rgba(45, 80, 22, 0.3);
     }
 
     .official-day-badge i {
@@ -66,24 +68,30 @@
     }
 
     .service-card.tactico {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        background: linear-gradient(135deg, #c85a28 0%, #d96c2f 100%);
+        /* Naranja oscuro */
     }
 
     .service-card.reconocimiento {
-        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
+        /* Verde oscuro */
     }
 
     .service-card.nocturno {
-        background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        background: linear-gradient(135deg, #1a472a 0%, #2d5f3d 100%);
+        /* Verde muy oscuro */
     }
 
     .service-card.banderin {
-        background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+        background: linear-gradient(135deg, #b8540f 0%, #d96c2f 100%);
+        /* Naranja medio */
     }
 
     .service-card.cuartelero {
-        background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);
+        background: linear-gradient(135deg, #3d6b1f 0%, #508a25 100%);
+        /* Verde medio */
     }
+
 
     .personnel-list {
         display: flex;
@@ -103,10 +111,11 @@
 
 
     .week-service-card {
-        background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%);
+        background: linear-gradient(135deg, #c85a28 0%, #b8540f 100%);
+        /* Naranja oscuro */
         border-radius: 20px;
         padding: 2rem;
-        box-shadow: 0 5px 25px rgba(255, 94, 98, 0.3);
+        box-shadow: 0 5px 25px rgba(200, 90, 40, 0.3);
         margin-bottom: 2rem;
     }
 
@@ -209,19 +218,20 @@
     }
 
     .btn-generate {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
+        /* Verde oscuro */
         border: none;
         color: white;
         padding: 1rem 2rem;
         border-radius: 10px;
         font-weight: 600;
         transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        box-shadow: 0 4px 15px rgba(45, 80, 22, 0.3);
     }
 
     .btn-generate:hover {
         transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        box-shadow: 0 6px 20px rgba(45, 80, 22, 0.4);
     }
 
     .btn-delete-week {
@@ -229,8 +239,8 @@
     }
 
     .btn-export-pdf {
-        background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
-    }
+    background: linear-gradient(135deg, #c85a28 0%, #b8540f 100%); /* Naranja oscuro */
+}
 
     .empty-state {
         text-align: center;
