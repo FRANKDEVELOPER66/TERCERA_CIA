@@ -317,14 +317,34 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                         <div class="personnel-list">
             `;
 
-            personal.forEach(p => {
+            personal.forEach((p, index) => {
+                let horarioTexto = '';
+
+                if (nombreServicio === 'SERVICIO NOCTURNO') {
+                    const turnos = ['PRIMER TURNO', 'SEGUNDO TURNO', 'TERCER TURNO'];
+                    horarioTexto = turnos[index] || `TURNO ${index + 1}`;
+                } else {
+                    horarioTexto = `${p.hora_inicio.substring(0, 5)} - ${p.hora_fin.substring(0, 5)}`;
+                }
+
                 html += `
-                    <div class="personnel-item">
-                        <span><strong>${p.grado}</strong> ${p.nombre_completo}</span>
-                        <span>${p.hora_inicio.substring(0, 5)} - ${p.hora_fin.substring(0, 5)}</span>
-                    </div>
-                `;
+        <div class="personnel-item">
+            <span><strong>${p.grado}</strong> ${p.nombre_completo}</span>
+            <span>${horarioTexto}</span>
+        </div>
+    `;
             });
+
+            // ⬅️ AGREGAR SOLO ESTO DESPUÉS DEL forEach
+            if (nombreServicio === 'SERVICIO NOCTURNO' && serviciosAgrupados['CUARTELERO']) {
+                const cuartelero = serviciosAgrupados['CUARTELERO'][0];
+                html += `
+        <div class="personnel-item">
+            <span><strong>${cuartelero.grado}</strong> ${cuartelero.nombre_completo}</span>
+            <span>CUARTO TURNO</span>
+        </div>
+    `;
+            }
 
             html += `
                         </div>

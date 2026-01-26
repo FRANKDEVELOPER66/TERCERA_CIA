@@ -209,22 +209,63 @@ class AsignacionServicio extends ActiveRecord
     private static function asignarServicioNocturno($fecha, $usuario_id, $id_oficial = null)
     {
         $asignaciones = [];
-        $soldados = self::obtenerPersonalDisponible($fecha, 'TROPA', 3, 'SERVICIO NOCTURNO'); // ⬅️ CAMBIAR DE 4 A 3
+        $lunes_str = self::obtenerLunesDeLaSemana($fecha);
 
-        foreach ($soldados as $sold) {
+        $sql = "SELECT p.id_personal
+        FROM bhr_personal p
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'SERVICIO NOCTURNO')
+        WHERE p.tipo = 'TROPA'
+            AND (g.nombre = 'Sargento 2do.' OR g.nombre = 'Cabo')
+            AND p.activo = 1
+            AND cd.id_calendario IS NULL
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio = :fecha2
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio = :fecha_lunes
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+            )
+        ORDER BY COALESCE(hr.dias_desde_ultimo, 999) DESC, RAND()
+        LIMIT 3";
+
+        $params = [
+            ':fecha' => $fecha,
+            ':fecha2' => $fecha,
+            ':fecha_lunes' => $lunes_str
+        ];
+
+        $soldados = self::fetchArray($sql, $params);
+
+        if (count($soldados) !== 3) {
+            error_log("Solo se encontraron " . count($soldados) . " soldados para nocturno: " . $fecha);
+            return [];
+        }
+
+        $horarios = [
+            ['21:00:00', '00:59:59'],
+            ['01:00:00', '03:59:59'],
+            ['04:00:00', '06:00:00']
+        ];
+
+        foreach ($soldados as $index => $sold) {
             $asignacion = self::crearAsignacion(
                 $sold['id_personal'],
                 'SERVICIO NOCTURNO',
                 $fecha,
-                '21:00:00',
-                '04:45:00',
+                $horarios[$index][0],
+                $horarios[$index][1],
                 $usuario_id,
                 $id_oficial
             );
+
             if ($asignacion) {
                 $asignaciones[] = $asignacion;
-
-                // Crear exclusión
                 $fecha_siguiente = date('Y-m-d', strtotime($fecha . ' +1 day'));
                 self::crearExclusion($sold['id_personal'], 'RECONOCIMIENTO', $fecha_siguiente, 'Servicio nocturno previo');
             }
