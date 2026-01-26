@@ -28,6 +28,8 @@ $router->post('/API/asignaciones/generar', [AsignacionController::class, 'genera
 $router->get('/API/asignaciones/obtener', [AsignacionController::class, 'obtenerSemanaAPI']);
 $router->post('/API/asignaciones/eliminar', [AsignacionController::class, 'eliminarSemanaAPI']);
 $router->get('/API/asignaciones/pdf', [AsignacionController::class, 'exportarPDFSemanaAPI']);
+$router->get('/asignaciones/exportar-pdf', [AsignacionController::class, 'exportarPDF']);
+$router->get('/asignaciones/debug', [AsignacionController::class, 'debugAsignaciones']);
 
 
 // Comprueba y valida las rutas

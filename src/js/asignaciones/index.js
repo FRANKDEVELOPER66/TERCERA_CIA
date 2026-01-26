@@ -464,5 +464,19 @@ btnConsultar.addEventListener('click', consultarServicios);
 btnEliminarSemana.addEventListener('click', eliminarSemana);
 btnExportarPDF.addEventListener('click', exportarPDF);
 
+
+// Al final del archivo, agrega:
+document.getElementById('btnExportarPDF')?.addEventListener('click', function () {
+    const fechaInicio = document.getElementById('fechaInicio').value;
+
+    if (!fechaInicio) {
+        Swal.fire('Error', 'Debes seleccionar una fecha', 'error');
+        return;
+    }
+
+    // Abrir PDF directamente
+    window.open(`/TERCERA_CIA/asignaciones/exportar-pdf?fecha=${fechaInicio}`, '_blank');
+});
+
 // Inicializar
 establecerProximoLunes();
