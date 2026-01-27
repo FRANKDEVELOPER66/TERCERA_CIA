@@ -248,19 +248,19 @@
     }
 
     .btn-delete-week {
-        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+        background: linear-gradient(135deg, #804d00ff 0%, #ff0f0fff 100%);
         border: none;
         color: white;
         padding: 1rem 2rem;
         border-radius: 10px;
         font-weight: 600;
         transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+        box-shadow: 0 4px 15px rgba(214, 52, 71, 0.3);
     }
 
     .btn-delete-week:hover {
         transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+        box-shadow: 0 6px 20px rgba(183, 21, 64, 0.4);
     }
 
     /* ✨ BOTÓN EXPORTAR PDF - Naranja llamativo */
