@@ -926,6 +926,9 @@ class AsignacionServicio extends ActiveRecord
     /**
      * Genera asignaciones para una semana completa (Lunes a Domingo)
      */
+    /**
+     * Genera asignaciones para una semana completa (Lunes a Domingo)
+     */
     public static function generarAsignacionesSemanal($fecha_inicio, $usuario_id = null)
     {
         $resultado = [
@@ -944,15 +947,21 @@ class AsignacionServicio extends ActiveRecord
                 return $resultado;
             }
 
-            // ⬇️ ACTUALIZAR DÍAS DESDE ÚLTIMO SERVICIO
-            self::actualizarDiasDesdeUltimo();
-            error_log("✅ Historial de rotaciones actualizado");
-
             $fecha_domingo = date('Y-m-d', strtotime($fecha_inicio . ' +6 days'));
 
-            // ⬇️ SOLO BORRAR ASIGNACIONES, NO HISTORIAL
-            error_log("🗑️ Limpiando asignaciones de {$fecha_inicio} a {$fecha_domingo} (manteniendo historial)");
+            // 1️⃣ Obtener personal que será afectado (ANTES de borrar)
+            error_log("📋 Obteniendo personal afectado por regeneración...");
+            $personal_a_recalcular = self::fetchArray(
+                "SELECT DISTINCT id_personal 
+             FROM asignaciones_servicio 
+             WHERE fecha_servicio BETWEEN :inicio AND :fin",
+                [':inicio' => $fecha_inicio, ':fin' => $fecha_domingo]
+            );
 
+            error_log("👥 Personal afectado: " . count($personal_a_recalcular) . " personas");
+
+            // 2️⃣ Eliminar asignaciones antiguas
+            error_log("🗑️ Limpiando asignaciones de {$fecha_inicio} a {$fecha_domingo}");
             $eliminadas = self::ejecutarQuery(
                 "DELETE FROM asignaciones_servicio 
              WHERE fecha_servicio BETWEEN :inicio AND :fin",
@@ -960,17 +969,28 @@ class AsignacionServicio extends ActiveRecord
             );
 
             error_log("✅ Asignaciones eliminadas: " . ($eliminadas['resultado'] ?? 0));
-            error_log("ℹ️ El historial de rotaciones se mantiene intacto");
+
+            // 3️⃣ Recalcular historial del personal afectado
+            error_log("🔄 Recalculando historial para personal afectado...");
+            foreach ($personal_a_recalcular as $persona) {
+                self::recalcularHistorialPersona($persona['id_personal']);
+            }
+            error_log("✅ Historial recalculado");
+
+            // 4️⃣ Actualizar días desde último servicio para TODOS
+            self::actualizarDiasDesdeUltimo();
+            error_log("✅ Días desde último servicio actualizados globalmente");
 
             $asignaciones_creadas = [];
 
-            // Generar para 7 días
+            // 5️⃣ Generar asignaciones para los 7 días
             for ($dia = 0; $dia < 7; $dia++) {
                 $fecha_servicio = clone $fecha;
                 $fecha_servicio->modify("+{$dia} days");
                 $fecha_str = $fecha_servicio->format('Y-m-d');
 
                 try {
+                    error_log("📅 Generando servicios para: {$fecha_str}");
                     $servicios_dia = self::generarServiciosPorDia($fecha_str, $usuario_id);
 
                     $asignaciones_creadas = array_merge($asignaciones_creadas, $servicios_dia);
@@ -980,15 +1000,24 @@ class AsignacionServicio extends ActiveRecord
                         'total' => count($servicios_dia),
                         'exito' => true
                     ];
-                } catch (\Exception $e) {
-                    // ⬇️ Si falla, hacer ROLLBACK de las asignaciones pero NO del historial
-                    error_log("❌ Error en {$fecha_str}, haciendo rollback de asignaciones");
 
+                    error_log("✅ Día completado: {$fecha_str} - " . count($servicios_dia) . " asignaciones");
+                } catch (\Exception $e) {
+                    // Si falla un día, hacer rollback COMPLETO
+                    error_log("❌ Error en {$fecha_str}: " . $e->getMessage());
+                    error_log("🔄 Haciendo rollback de toda la semana...");
+
+                    // Eliminar todas las asignaciones creadas hasta ahora
                     self::ejecutarQuery(
                         "DELETE FROM asignaciones_servicio 
                      WHERE fecha_servicio BETWEEN :inicio AND :fecha_actual",
                         [':inicio' => $fecha_inicio, ':fecha_actual' => $fecha_str]
                     );
+
+                    // Recalcular historial nuevamente
+                    foreach ($personal_a_recalcular as $persona) {
+                        self::recalcularHistorialPersona($persona['id_personal']);
+                    }
 
                     $resultado['errores'][] = [
                         'fecha' => $fecha_str,
@@ -1006,12 +1035,17 @@ class AsignacionServicio extends ActiveRecord
                 }
             }
 
+            // 6️⃣ Si todo salió bien
             $resultado['exito'] = true;
             $resultado['mensaje'] = 'Asignaciones generadas exitosamente para toda la semana';
             $resultado['asignaciones'] = $asignaciones_creadas;
 
+            error_log("🎉 GENERACIÓN COMPLETA: " . count($asignaciones_creadas) . " asignaciones totales");
+
             return $resultado;
         } catch (\Exception $e) {
+            error_log("💥 ERROR FATAL: " . $e->getMessage());
+
             $resultado['mensaje'] = $e->getMessage();
             $resultado['debug']['excepcion'] = [
                 'mensaje' => $e->getMessage(),
@@ -1335,19 +1369,178 @@ class AsignacionServicio extends ActiveRecord
     }
 
     /**
-     * Elimina asignaciones de una semana
+     * Elimina asignaciones de una semana Y recalcula el historial
      */
     public static function eliminarAsignacionesSemana($fecha_inicio)
     {
-        $fecha_fin = date('Y-m-d', strtotime($fecha_inicio . ' +6 days'));
+        try {
+            $fecha_fin = date('Y-m-d', strtotime($fecha_inicio . ' +6 days'));
 
-        $sql = "DELETE FROM asignaciones_servicio 
+            error_log("🗑️ === ELIMINANDO SEMANA: {$fecha_inicio} a {$fecha_fin} ===");
+
+            // 1️⃣ Obtener personal afectado ANTES de borrar
+            $personal_afectado = self::fetchArray(
+                "SELECT DISTINCT id_personal 
+             FROM asignaciones_servicio 
+             WHERE fecha_servicio BETWEEN :inicio AND :fin",
+                [':inicio' => $fecha_inicio, ':fin' => $fecha_fin]
+            );
+
+            $cantidad_personas = is_array($personal_afectado) ? count($personal_afectado) : 0;
+            error_log("👥 Personal afectado: {$cantidad_personas} personas");
+
+            // 2️⃣ Eliminar las asignaciones
+            $sql = "DELETE FROM asignaciones_servicio 
                 WHERE fecha_servicio BETWEEN :inicio AND :fin";
 
-        return self::ejecutarQuery($sql, [
-            ':inicio' => $fecha_inicio,
-            ':fin' => $fecha_fin
-        ]);
+            $resultado = self::ejecutarQuery($sql, [
+                ':inicio' => $fecha_inicio,
+                ':fin' => $fecha_fin
+            ]);
+
+            $registros_eliminados = 0;
+            if (is_array($resultado) && isset($resultado['resultado'])) {
+                $registros_eliminados = $resultado['resultado'];
+            }
+
+            error_log("✅ Asignaciones eliminadas: {$registros_eliminados}");
+
+            // 3️⃣ Recalcular historial para el personal afectado
+            if ($cantidad_personas > 0) {
+                error_log("🔄 Recalculando historial...");
+
+                $recalculados = 0;
+                foreach ($personal_afectado as $persona) {
+                    if (self::recalcularHistorialPersona($persona['id_personal'])) {
+                        $recalculados++;
+                    }
+                }
+
+                error_log("✅ Historial recalculado para {$recalculados}/{$cantidad_personas} personas");
+            }
+
+            error_log("🎉 ELIMINACIÓN COMPLETADA");
+
+            return [
+                'resultado' => $registros_eliminados,
+                'personal_afectado' => $cantidad_personas
+            ];
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en eliminarAsignacionesSemana: " . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    // Nueva función auxiliar
+    /**
+     * Recalcula el historial de rotaciones para una persona específica
+     * basándose en sus asignaciones REALES en la base de datos
+     */
+    /**
+     * Recalcula el historial de rotaciones para una persona específica
+     */
+    /**
+     * Recalcula el historial de rotaciones para una persona específica
+     * Versión SIMPLE y SEGURA
+     */
+    private static function recalcularHistorialPersona($id_personal)
+    {
+        error_log("🔄 Recalculando historial para persona ID: {$id_personal}");
+
+        try {
+            // Obtener todos los tipos de servicio
+            $tipos_servicio = self::fetchArray(
+                "SELECT id_tipo_servicio FROM tipos_servicio",
+                []
+            );
+
+            foreach ($tipos_servicio as $tipo) {
+                $id_tipo = $tipo['id_tipo_servicio'];
+
+                // Buscar la última fecha de este servicio para esta persona
+                $ultima = self::fetchFirst(
+                    "SELECT MAX(fecha_servicio) as ultima_fecha
+                 FROM asignaciones_servicio
+                 WHERE id_personal = :id_personal
+                 AND id_tipo_servicio = :id_tipo",
+                    [
+                        ':id_personal' => $id_personal,
+                        ':id_tipo' => $id_tipo
+                    ]
+                );
+
+                $ultima_fecha = $ultima['ultima_fecha'] ?? null;
+
+                // Verificar si ya existe registro en historial
+                $existe = self::fetchFirst(
+                    "SELECT id_historial 
+                 FROM historial_rotaciones 
+                 WHERE id_personal = :id_personal 
+                 AND id_tipo_servicio = :id_tipo",
+                    [
+                        ':id_personal' => $id_personal,
+                        ':id_tipo' => $id_tipo
+                    ]
+                );
+
+                if ($existe) {
+                    // Actualizar registro existente
+                    if ($ultima_fecha) {
+                        $dias = (new \DateTime())->diff(new \DateTime($ultima_fecha))->days;
+
+                        self::ejecutarQuery(
+                            "UPDATE historial_rotaciones 
+                         SET fecha_ultimo_servicio = :fecha,
+                             dias_desde_ultimo = :dias
+                         WHERE id_personal = :id_personal 
+                         AND id_tipo_servicio = :id_tipo",
+                            [
+                                ':fecha' => $ultima_fecha,
+                                ':dias' => $dias,
+                                ':id_personal' => $id_personal,
+                                ':id_tipo' => $id_tipo
+                            ]
+                        );
+                    } else {
+                        // No tiene asignaciones, resetear a NULL
+                        self::ejecutarQuery(
+                            "UPDATE historial_rotaciones 
+                         SET fecha_ultimo_servicio = NULL,
+                             dias_desde_ultimo = 999
+                         WHERE id_personal = :id_personal 
+                         AND id_tipo_servicio = :id_tipo",
+                            [
+                                ':id_personal' => $id_personal,
+                                ':id_tipo' => $id_tipo
+                            ]
+                        );
+                    }
+                } else {
+                    // Crear nuevo registro si tiene asignaciones
+                    if ($ultima_fecha) {
+                        $dias = (new \DateTime())->diff(new \DateTime($ultima_fecha))->days;
+
+                        self::ejecutarQuery(
+                            "INSERT INTO historial_rotaciones 
+                         (id_personal, id_tipo_servicio, fecha_ultimo_servicio, dias_desde_ultimo, prioridad)
+                         VALUES (:id_personal, :id_tipo, :fecha, :dias, 0)",
+                            [
+                                ':id_personal' => $id_personal,
+                                ':id_tipo' => $id_tipo,
+                                ':fecha' => $ultima_fecha,
+                                ':dias' => $dias
+                            ]
+                        );
+                    }
+                }
+            }
+
+            error_log("✅ Historial recalculado para persona {$id_personal}");
+            return true;
+        } catch (\Exception $e) {
+            error_log("❌ ERROR al recalcular historial persona {$id_personal}: " . $e->getMessage());
+            return false;
+        }
     }
 
     /**

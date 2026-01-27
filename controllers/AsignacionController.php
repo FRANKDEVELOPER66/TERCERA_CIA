@@ -137,6 +137,9 @@ class AsignacionController
     /**
      * Elimina las asignaciones de una semana
      */
+    /**
+     * Elimina las asignaciones de una semana
+     */
     public static function eliminarSemanaAPI()
     {
         header('Content-Type: application/json; charset=UTF-8');
@@ -153,14 +156,17 @@ class AsignacionController
         }
 
         try {
-            AsignacionServicio::eliminarAsignacionesSemana($fecha_inicio);
+            $resultado = AsignacionServicio::eliminarAsignacionesSemana($fecha_inicio);
 
             http_response_code(200);
             echo json_encode([
                 'codigo' => 1,
-                'mensaje' => 'Asignaciones eliminadas exitosamente',
+                'mensaje' => 'Asignaciones eliminadas y historial recalculado exitosamente',
+                'registros_eliminados' => $resultado['resultado'] ?? 0
             ], JSON_UNESCAPED_UNICODE);
         } catch (Exception $e) {
+            error_log("❌ ERROR en eliminarSemanaAPI: " . $e->getMessage());
+
             http_response_code(500);
             echo json_encode([
                 'codigo' => 0,

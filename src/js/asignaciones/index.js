@@ -461,9 +461,34 @@ const eliminarSemana = async () => {
         };
 
         const respuesta = await fetch(url, config);
-        const data = await respuesta.json();
+
+        // ⬇️ AGREGAR ESTO PARA VER QUÉ ESTÁ DEVOLVIENDO
+        const textoRespuesta = await respuesta.text();
+        console.log('=== RESPUESTA RAW DEL SERVIDOR ===');
+        console.log(textoRespuesta);
+        console.log('===================================');
 
         mostrarLoading(false);
+
+        // Intentar parsear como JSON
+        let data;
+        try {
+            data = JSON.parse(textoRespuesta);
+        } catch (e) {
+            console.error('Error al parsear JSON:', e);
+            Swal.fire({
+                icon: 'error',
+                title: 'Error del servidor',
+                html: `
+                    <p>El servidor devolvió un error. Revisa la consola (F12)</p>
+                    <details>
+                        <summary>Ver error</summary>
+                        <pre style="text-align: left; font-size: 10px; max-height: 300px; overflow: auto;">${textoRespuesta.substring(0, 1000)}</pre>
+                    </details>
+                `
+            });
+            return;
+        }
 
         if (data.codigo === 1) {
             Toast.fire({
@@ -494,7 +519,7 @@ const eliminarSemana = async () => {
         Swal.fire({
             icon: 'error',
             title: 'Error',
-            text: 'Error al eliminar servicios'
+            text: 'Error al eliminar servicios: ' + error.message
         });
     }
 };
