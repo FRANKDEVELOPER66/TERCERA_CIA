@@ -17,26 +17,26 @@ const loadingOverlay = document.getElementById('loadingOverlay');
 let estadoVista = 'seleccion'; // 'seleccion', 'consultando', 'generando'
 
 // Establecer el próximo lunes como fecha por defecto
-const establecerProximoLunes = () => {
-    const hoy = new Date();
-    const diaSemana = hoy.getDay(); // 0 = Domingo, 1 = Lunes, etc.
-
-    let diasHastaLunes = 0;
-    if (diaSemana === 0) { // Domingo
-        diasHastaLunes = 1;
-    } else if (diaSemana !== 1) { // No es lunes
-        diasHastaLunes = 8 - diaSemana;
-    }
-
-    const proximoLunes = new Date(hoy);
-    proximoLunes.setDate(hoy.getDate() + diasHastaLunes);
-
-    const year = proximoLunes.getFullYear();
-    const month = String(proximoLunes.getMonth() + 1).padStart(2, '0');
-    const day = String(proximoLunes.getDate()).padStart(2, '0');
-
-    fechaInicio.value = `${year}-${month}-${day}`;
-};
+//const establecerProximoLunes = () => {
+//    const hoy = new Date();
+//    const diaSemana = hoy.getDay(); // 0 = Domingo, 1 = Lunes, etc.
+//
+//    let diasHastaLunes = 0;
+//    if (diaSemana === 0) { // Domingo
+//        diasHastaLunes = 1;
+//    } else if (diaSemana !== 1) { // No es lunes
+//        diasHastaLunes = 8 - diaSemana;
+//    }
+//
+//    const proximoLunes = new Date(hoy);
+//   proximoLunes.setDate(hoy.getDate() + diasHastaLunes);
+//
+//    const year = proximoLunes.getFullYear();
+//    const month = String(proximoLunes.getMonth() + 1).padStart(2, '0');
+//    const day = String(proximoLunes.getDate()).padStart(2, '0');
+//
+//    fechaInicio.value = `${year}-${month}-${day}`;
+//};
 
 // Validar que sea lunes
 const validarLunes = (fecha) => {
@@ -261,8 +261,18 @@ const generarServicios = async () => {
                 icon: 'success',
                 title: data.mensaje
             });
-            mostrarServicios(data.datos, fecha);
-            gestionarBotones('generado_nuevo'); // ✨ Cambio de contexto
+
+            // ✅ SOLUCIÓN: Consultar los datos recién generados
+            const datosGenerados = await consultarServiciosSinUI(fecha);
+
+            if (datosGenerados && datosGenerados.length > 0) {
+                mostrarServicios(datosGenerados, fecha);
+                gestionarBotones('generado_nuevo');
+            } else {
+                // Fallback: si no se obtienen datos, recargar
+                console.warn('No se obtuvieron datos, recargando...');
+                await consultarServicios();
+            }
         } else {
             Swal.fire({
                 icon: 'error',
@@ -336,6 +346,25 @@ const consultarServicios = async () => {
             title: 'Error',
             text: 'Error al consultar servicios'
         });
+    }
+};
+
+
+// ✨ NUEVA FUNCIÓN: Consultar servicios sin mostrar UI (solo obtener datos)
+const consultarServiciosSinUI = async (fecha) => {
+    try {
+        const url = `/TERCERA_CIA/API/asignaciones/obtener?fecha_inicio=${fecha}`;
+        const respuesta = await fetch(url);
+        const data = await respuesta.json();
+
+        if (data.codigo === 1 && data.datos && data.datos.length > 0) {
+            return data.datos;
+        }
+
+        return null;
+    } catch (error) {
+        console.error('Error al consultar servicios:', error);
+        return null;
     }
 };
 
@@ -659,5 +688,5 @@ btnRegresar.addEventListener('click', regresarASeleccion); // ✨ Nuevo
 fechaInicio.addEventListener('change', manejarCambioFecha); // ✨ Nuevo
 
 // Inicializar
-establecerProximoLunes();
+//establecerProximoLunes();
 gestionarBotones('inicial');

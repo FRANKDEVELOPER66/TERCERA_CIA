@@ -328,8 +328,15 @@
                         <label for="fechaInicio" class="form-label fw-bold">
                             <i class="bi bi-calendar-event"></i> Seleccionar Semana (Lunes)
                         </label>
-                        <input type="date" id="fechaInicio" class="form-control form-control-lg">
-                        <small class="text-muted">Debe seleccionar un día LUNES para iniciar la semana</small>
+                        <input
+                            type="date"
+                            id="fechaInicio"
+                            class="form-control form-control-lg"
+                            placeholder="Seleccione un lunes">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle"></i>
+                            <strong>Por favor, seleccione un día LUNES</strong> para iniciar la semana
+                        </small>
                     </div>
                     <div class="d-flex gap-2 align-items-end">
                         <!-- ✨ Botón Generar -->
