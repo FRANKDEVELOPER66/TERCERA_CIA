@@ -1502,11 +1502,9 @@ class AsignacionServicio extends ActiveRecord
                             ]
                         );
                     } else {
-                        // No tiene asignaciones, resetear a NULL
+                        // No tiene asignaciones, eliminar el registro
                         self::ejecutarQuery(
-                            "UPDATE historial_rotaciones 
-                         SET fecha_ultimo_servicio = NULL,
-                             dias_desde_ultimo = 999
+                            "DELETE FROM historial_rotaciones 
                          WHERE id_personal = :id_personal 
                          AND id_tipo_servicio = :id_tipo",
                             [
