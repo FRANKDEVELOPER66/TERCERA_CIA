@@ -9,8 +9,12 @@ const btnGenerar = document.getElementById('btnGenerar');
 const btnConsultar = document.getElementById('btnConsultar');
 const btnEliminarSemana = document.getElementById('btnEliminarSemana');
 const btnExportarPDF = document.getElementById('btnExportarPDF');
+const btnRegresar = document.getElementById('btnRegresar');
 const contenedorResultados = document.getElementById('contenedorResultados');
 const loadingOverlay = document.getElementById('loadingOverlay');
+
+// Estado de la vista
+let estadoVista = 'seleccion'; // 'seleccion', 'consultando', 'generando'
 
 // Establecer el próximo lunes como fecha por defecto
 const establecerProximoLunes = () => {
@@ -45,6 +49,122 @@ const mostrarLoading = (mostrar) => {
     loadingOverlay.style.display = mostrar ? 'flex' : 'none';
 };
 
+// ✨ NUEVA FUNCIÓN: Gestionar visibilidad de botones según contexto
+const gestionarBotones = (contexto) => {
+    // Ocultar todos primero
+    btnGenerar.style.display = 'none';
+    btnConsultar.style.display = 'none';
+    btnEliminarSemana.style.display = 'none';
+    btnExportarPDF.style.display = 'none';
+    btnRegresar.style.display = 'none';
+
+    switch (contexto) {
+        case 'semana_existente':
+            // Hay servicios generados: solo consultar
+            btnConsultar.style.display = '';
+            estadoVista = 'seleccion';
+            break;
+
+        case 'semana_nueva':
+            // No hay servicios: solo generar
+            btnGenerar.style.display = '';
+            estadoVista = 'seleccion';
+            break;
+
+        case 'consultando':
+            // Viendo servicios existentes: exportar PDF y regresar
+            btnExportarPDF.style.display = '';
+            btnRegresar.style.display = '';
+            estadoVista = 'consultando';
+            break;
+
+        case 'generado_nuevo':
+            // Recién generados: exportar PDF, eliminar y regresar
+            btnExportarPDF.style.display = '';
+            btnEliminarSemana.style.display = '';
+            btnRegresar.style.display = '';
+            estadoVista = 'generando';
+            break;
+
+        case 'inicial':
+            // Estado inicial: ocultar todo hasta que seleccionen
+            estadoVista = 'seleccion';
+            break;
+    }
+};
+
+// ✨ NUEVA FUNCIÓN: Verificar si existe una semana en BD
+const verificarSemanaExistente = async (fecha) => {
+    try {
+        const url = `/TERCERA_CIA/API/asignaciones/obtener?fecha_inicio=${fecha}`;
+        const respuesta = await fetch(url);
+        const data = await respuesta.json();
+
+        return data.codigo === 1 && data.datos && data.datos.length > 0;
+    } catch (error) {
+        console.error('Error al verificar semana:', error);
+        return false;
+    }
+};
+
+// ✨ NUEVA FUNCIÓN: Manejar cambio de fecha
+const manejarCambioFecha = async () => {
+    const fecha = fechaInicio.value;
+
+    if (!fecha) {
+        gestionarBotones('inicial');
+        return;
+    }
+
+    if (!validarLunes(fecha)) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Día inválido',
+            text: 'Debe seleccionar un día LUNES',
+            confirmButtonText: 'Entendido'
+        });
+        fechaInicio.value = '';
+        gestionarBotones('inicial');
+        return;
+    }
+
+    // Verificar si ya existe
+    mostrarLoading(true);
+    const existe = await verificarSemanaExistente(fecha);
+    mostrarLoading(false);
+
+    if (existe) {
+        gestionarBotones('semana_existente');
+    } else {
+        gestionarBotones('semana_nueva');
+    }
+
+    // Limpiar resultados si había algo
+    if (estadoVista === 'seleccion') {
+        contenedorResultados.innerHTML = `
+            <div class="empty-state">
+                <i class="bi bi-calendar-check"></i>
+                <h3>Selecciona una acción</h3>
+                <p>${existe ? 'Esta semana ya tiene servicios generados' : 'Genera los servicios para esta semana'}</p>
+            </div>
+        `;
+    }
+};
+
+// ✨ NUEVA FUNCIÓN: Regresar a selección
+const regresarASeleccion = () => {
+    contenedorResultados.innerHTML = `
+        <div class="empty-state">
+            <i class="bi bi-calendar-check"></i>
+            <h3>Selecciona una semana</h3>
+            <p>Elige un lunes y genera o consulta los servicios</p>
+        </div>
+    `;
+
+    // Re-verificar el estado de la fecha actual
+    manejarCambioFecha();
+};
+
 // Generar servicios de una semana
 const generarServicios = async () => {
     const fecha = fechaInicio.value;
@@ -71,11 +191,19 @@ const generarServicios = async () => {
     const confirmacion = await Swal.fire({
         icon: 'question',
         title: '¿Generar servicios?',
-        html: `Se generarán los servicios para la semana del:<br><strong>${formatearFecha(fecha)}</strong>`,
+        html: `
+        <p>Se generarán los servicios para la semana del</p>
+        <p><strong>${formatearFecha(fecha)}</strong></p>
+        <hr style="margin: 1.5rem 0; border-top: 2px solid #e2e8f0;">
+        <p style="color: #ff6b6b; font-weight: 600; margin-top: 1rem;">
+            <i class="bi bi-exclamation-triangle-fill"></i> 
+            Importante: Esta acción solo puede realizarse una vez. Al generar la semana, no podrá crear otra posteriormente.
+        </p>
+    `,
         showCancelButton: true,
         confirmButtonText: 'Sí, generar',
         cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#667eea'
+        confirmButtonColor: '#2d5016'
     });
 
     if (!confirmacion.isConfirmed) return;
@@ -104,7 +232,6 @@ const generarServicios = async () => {
             throw new Error('La respuesta NO es JSON, revisa la consola');
         }
 
-        // ⬇️ MOSTRAR DEBUG EN CONSOLA
         if (data.debug) {
             console.log('=== DEBUG COMPLETO ===');
             console.log(data.debug);
@@ -115,14 +242,12 @@ const generarServicios = async () => {
             }
         }
 
-        // ⬇️ MOSTRAR ERRORES DETALLADOS
         if (data.errores && data.errores.length > 0) {
             console.log('=== ERRORES DETALLADOS ===');
             data.errores.forEach(error => {
                 console.log(`Fecha: ${error.fecha}`);
                 console.log(`Error: ${error.error}`);
 
-                // Si el error tiene logs
                 if (error.logs) {
                     console.log('Logs:', error.logs);
                 }
@@ -136,7 +261,8 @@ const generarServicios = async () => {
                 icon: 'success',
                 title: data.mensaje
             });
-            consultarServicios();
+            mostrarServicios(data.datos, fecha);
+            gestionarBotones('generado_nuevo'); // ✨ Cambio de contexto
         } else {
             Swal.fire({
                 icon: 'error',
@@ -189,10 +315,9 @@ const consultarServicios = async () => {
 
         mostrarLoading(false);
 
-        if (data.codigo === 1) {
+        if (data.codigo === 1 && data.datos.length > 0) {
             mostrarServicios(data.datos, fecha);
-            btnEliminarSemana.style.display = data.datos.length > 0 ? '' : 'none';
-            btnExportarPDF.style.display = data.datos.length > 0 ? '' : 'none';
+            gestionarBotones('consultando'); // ✨ Cambio de contexto
         } else {
             contenedorResultados.innerHTML = `
                 <div class="empty-state">
@@ -201,6 +326,7 @@ const consultarServicios = async () => {
                     <p>No se encontraron asignaciones para esta semana</p>
                 </div>
             `;
+            gestionarBotones('inicial');
         }
     } catch (error) {
         mostrarLoading(false);
@@ -267,7 +393,6 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
         `;
 
         serviciosSemana.forEach(s => {
-            // ⬇️ CONSTRUIR GRADO CON ESPECIALISTA
             let gradoCompleto = s.grado;
             if (s.tipo_personal === 'ESPECIALISTA') {
                 gradoCompleto += ' ESPECIALISTA';
@@ -306,8 +431,6 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
     Object.keys(serviciosPorDia).sort().forEach(fecha => {
         const serviciosDelDia = serviciosPorDia[fecha];
         const serviciosAgrupados = agruparPorServicio(serviciosDelDia);
-
-        // Obtener el oficial del día
         const oficialDia = serviciosDelDia[0];
 
         html += `
@@ -332,46 +455,40 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                     <div class="row">
         `;
 
-        // ⬇️ ORDEN FIJO DE SERVICIOS CON LAYOUT MEJORADO
         const ordenServicios = [
-            'TACTICO',           // Fila 1 - Col 1
-            'TACTICO TROPA',     // Fila 1 - Col 2
-            'BANDERÍN',          // Fila 1 - Col 3
-            'RECONOCIMIENTO',    // Fila 2 - Col 1 (50%)
-            'SERVICIO NOCTURNO', // Fila 2 - Col 2 (50%)
-            'CUARTELERO'         // Fila 3 - debajo de nocturno (50%)
+            'TACTICO',
+            'TACTICO TROPA',
+            'BANDERÍN',
+            'RECONOCIMIENTO',
+            'SERVICIO NOCTURNO',
+            'CUARTELERO'
         ];
 
-        // Mostrar cada tipo de servicio EN ORDEN
         ordenServicios.forEach((nombreServicio) => {
-            if (!serviciosAgrupados[nombreServicio]) return; // Saltar si no existe
+            if (!serviciosAgrupados[nombreServicio]) return;
 
             const personal = serviciosAgrupados[nombreServicio];
             const claseServicio = nombreServicio.toLowerCase().replace(/\s+/g, '');
 
-            // ⬇️ DETERMINAR TAMAÑO DE COLUMNA Y BREAKS
-            let colSize = 'col-md-6 col-lg-4'; // Por defecto: 1/3 del ancho
-            let breakAfter = ''; // Para forzar saltos de línea
+            let colSize = 'col-md-6 col-lg-4';
+            let breakAfter = '';
 
-            // Primera fila: TACTICO, TACTICO TROPA, BANDERÍN (33% cada uno)
             if (nombreServicio === 'TACTICO' || nombreServicio === 'TACTICO TROPA' || nombreServicio === 'BANDERÍN') {
                 colSize = 'col-md-6 col-lg-4';
                 if (nombreServicio === 'BANDERÍN') {
-                    breakAfter = '<div class="w-100"></div>'; // Salto después de BANDERÍN
+                    breakAfter = '<div class="w-100"></div>';
                 }
             }
 
-            // Segunda fila: RECONOCIMIENTO y SERVICIO NOCTURNO (50% cada uno)
             if (nombreServicio === 'RECONOCIMIENTO' || nombreServicio === 'SERVICIO NOCTURNO') {
                 colSize = 'col-md-6 col-lg-6';
                 if (nombreServicio === 'SERVICIO NOCTURNO') {
-                    breakAfter = '<div class="w-100"></div>'; // Salto después de NOCTURNO
+                    breakAfter = '<div class="w-100"></div>';
                 }
             }
 
-            // Tercera fila: CUARTELERO (50%, alineado a la derecha)
             if (nombreServicio === 'CUARTELERO') {
-                colSize = 'col-md-6 col-lg-6 offset-lg-6'; // 50% + offset para alinearlo a la derecha
+                colSize = 'col-md-6 col-lg-6 offset-lg-6';
             }
 
             html += `
@@ -379,7 +496,7 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                     <div class="service-card ${claseServicio}">
                         <h4>
                             <i class="bi bi-shield-check"></i> 
-                            ${nombreServicio}
+                            ${nombreServicio === 'TACTICO' ? 'TÁCTICO' : nombreServicio}
                         </h4>
                         <div class="personnel-list">
             `;
@@ -391,14 +508,11 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                     const turnos = ['PRIMER TURNO', 'SEGUNDO TURNO', 'TERCER TURNO'];
                     horarioTexto = turnos[index] || `TURNO ${index + 1}`;
                 } else if (nombreServicio === 'CUARTELERO') {
-                    // CUARTELERO no muestra horario
                     horarioTexto = '';
                 } else {
-                    // Otros servicios muestran horario
                     horarioTexto = `${p.hora_inicio.substring(0, 5)} - ${p.hora_fin.substring(0, 5)}`;
                 }
 
-                // ⬇️ CONSTRUIR GRADO CON ESPECIALISTA
                 let gradoCompleto = p.grado;
                 if (p.tipo_personal === 'ESPECIALISTA') {
                     gradoCompleto += ' ESPECIALISTA';
@@ -461,16 +575,13 @@ const eliminarSemana = async () => {
         };
 
         const respuesta = await fetch(url, config);
-
-        // ⬇️ AGREGAR ESTO PARA VER QUÉ ESTÁ DEVOLVIENDO
         const textoRespuesta = await respuesta.text();
+
         console.log('=== RESPUESTA RAW DEL SERVIDOR ===');
         console.log(textoRespuesta);
-        console.log('===================================');
 
         mostrarLoading(false);
 
-        // Intentar parsear como JSON
         let data;
         try {
             data = JSON.parse(textoRespuesta);
@@ -496,16 +607,7 @@ const eliminarSemana = async () => {
                 title: data.mensaje
             });
 
-            contenedorResultados.innerHTML = `
-                <div class="empty-state">
-                    <i class="bi bi-calendar-check"></i>
-                    <h3>Semana eliminada</h3>
-                    <p>Los servicios han sido eliminados correctamente</p>
-                </div>
-            `;
-
-            btnEliminarSemana.style.display = 'none';
-            btnExportarPDF.style.display = 'none';
+            regresarASeleccion(); // ✨ Regresar a selección después de eliminar
         } else {
             Swal.fire({
                 icon: 'error',
@@ -524,18 +626,16 @@ const eliminarSemana = async () => {
     }
 };
 
-// Exportar a PDF (placeholder)
-const exportarPDF = async () => {
-    const fecha = fechaInicio.value;
+// Exportar a PDF
+const exportarPDF = () => {
+    const fechaSeleccionada = fechaInicio.value;
 
-    Toast.fire({
-        icon: 'info',
-        title: 'Función pendiente',
-        text: 'La exportación a PDF se implementará próximamente'
-    });
+    if (!fechaSeleccionada) {
+        Swal.fire('Error', 'Debes seleccionar una fecha', 'error');
+        return;
+    }
 
-    // Aquí iría la lógica de exportación
-    // window.open(`/TERCERA_CIA/API/asignaciones/pdf?fecha_inicio=${fecha}`, '_blank');
+    window.open(`/TERCERA_CIA/asignaciones/exportar-pdf?fecha=${fechaSeleccionada}`, '_blank');
 };
 
 // Formatear fecha a español
@@ -555,19 +655,9 @@ btnGenerar.addEventListener('click', generarServicios);
 btnConsultar.addEventListener('click', consultarServicios);
 btnEliminarSemana.addEventListener('click', eliminarSemana);
 btnExportarPDF.addEventListener('click', exportarPDF);
-
-// Al final del archivo, agrega:
-document.getElementById('btnExportarPDF')?.addEventListener('click', function () {
-    const fechaInicio = document.getElementById('fechaInicio').value;
-
-    if (!fechaInicio) {
-        Swal.fire('Error', 'Debes seleccionar una fecha', 'error');
-        return;
-    }
-
-    // Abrir PDF directamente
-    window.open(`/TERCERA_CIA/asignaciones/exportar-pdf?fecha=${fechaInicio}`, '_blank');
-});
+btnRegresar.addEventListener('click', regresarASeleccion); // ✨ Nuevo
+fechaInicio.addEventListener('change', manejarCambioFecha); // ✨ Nuevo
 
 // Inicializar
 establecerProximoLunes();
+gestionarBotones('inicial');

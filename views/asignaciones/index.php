@@ -15,7 +15,6 @@
 
     .service-card {
         background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
-        /* Verde oscuro por defecto */
         color: white;
         border-radius: 15px;
         padding: 1.5rem;
@@ -32,7 +31,6 @@
         align-items: center;
         gap: 0.5rem;
         background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
-        /* Verde oscuro */
         color: white;
         padding: 0.5rem 1rem;
         border-radius: 10px;
@@ -73,17 +71,14 @@
 
     .service-card.reconocimiento {
         background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
-        /* Verde oscuro */
     }
 
     .service-card.nocturno {
         background: linear-gradient(135deg, #1a472a 0%, #2d5f3d 100%);
-        /* Verde muy oscuro */
     }
 
     .service-card.banderin {
         background: linear-gradient(135deg, #b8540f 0%, #d96c2f 100%);
-        /* Naranja medio */
     }
 
     .service-card.tacticotropa {
@@ -92,9 +87,7 @@
 
     .service-card.cuartelero {
         background: #652900ff;
-        /* Naranja más claro */
     }
-
 
     .personnel-list {
         display: flex;
@@ -112,10 +105,8 @@
         align-items: center;
     }
 
-
     .week-service-card {
         background: linear-gradient(135deg, #c85a28 0%, #b8540f 100%);
-        /* Naranja oscuro */
         border-radius: 20px;
         padding: 2rem;
         box-shadow: 0 5px 25px rgba(200, 90, 40, 0.3);
@@ -220,9 +211,9 @@
         height: 4rem;
     }
 
+    /* ✨ NUEVOS ESTILOS PARA BOTONES */
     .btn-generate {
         background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
-        /* Verde oscuro */
         border: none;
         color: white;
         padding: 1rem 2rem;
@@ -235,15 +226,75 @@
     .btn-generate:hover {
         transform: translateY(-2px);
         box-shadow: 0 6px 20px rgba(45, 80, 22, 0.4);
+        background: linear-gradient(135deg, #3d6b1f 0%, #4a8025 100%);
+    }
+
+    /* ✨ BOTÓN CONSULTAR - Azul llamativo */
+    .btn-consult {
+        background: linear-gradient(135deg, #4c84ff 0%, #667eea 100%);
+        border: none;
+        color: white;
+        padding: 1rem 2rem;
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-consult:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(76, 132, 255, 0.4);
+        background: linear-gradient(135deg, #667eea 0%, #4c84ff 100%);
     }
 
     .btn-delete-week {
         background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+        border: none;
+        color: white;
+        padding: 1rem 2rem;
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
     }
 
+    .btn-delete-week:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+    }
+
+    /* ✨ BOTÓN EXPORTAR PDF - Naranja llamativo */
     .btn-export-pdf {
-        background: linear-gradient(135deg, #c85a28 0%, #b8540f 100%);
-        /* Naranja oscuro */
+        background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%);
+        border: none;
+        color: white;
+        padding: 1rem 2rem;
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(245, 87, 108, 0.3);
+    }
+
+    .btn-export-pdf:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(201, 42, 42, 0.4);
+    }
+
+    /* ✨ BOTÓN REGRESAR - Gris elegante */
+    .btn-back {
+        background: linear-gradient(135deg, #868f96 0%, #596164 100%);
+        border: none;
+        color: white;
+        padding: 1rem 2rem;
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(89, 97, 100, 0.3);
+    }
+
+    .btn-back:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(89, 97, 100, 0.4);
     }
 
     .empty-state {
@@ -281,17 +332,29 @@
                         <small class="text-muted">Debe seleccionar un día LUNES para iniciar la semana</small>
                     </div>
                     <div class="d-flex gap-2 align-items-end">
-                        <button id="btnGenerar" class="btn btn-generate">
+                        <!-- ✨ Botón Generar -->
+                        <button id="btnGenerar" class="btn btn-generate" style="display: none;">
                             <i class="bi bi-lightning-charge-fill"></i> Generar Servicios
                         </button>
-                        <button id="btnConsultar" class="btn btn-primary-custom">
+
+                        <!-- ✨ Botón Consultar - con nueva clase -->
+                        <button id="btnConsultar" class="btn btn-consult" style="display: none;">
                             <i class="bi bi-search"></i> Consultar
                         </button>
+
+                        <!-- ✨ Botón Eliminar -->
                         <button id="btnEliminarSemana" class="btn btn-delete-week" style="display: none;">
                             <i class="bi bi-trash"></i> Eliminar Semana
                         </button>
+
+                        <!-- ✨ Botón Exportar PDF - mejorado -->
                         <button id="btnExportarPDF" class="btn btn-export-pdf" style="display: none;">
-                            <i class="bi bi-file-pdf"></i> Exportar PDF
+                            <i class="bi bi-file-pdf-fill"></i> Exportar PDF
+                        </button>
+
+                        <!-- ✨ NUEVO: Botón Regresar -->
+                        <button id="btnRegresar" class="btn btn-back" style="display: none;">
+                            <i class="bi bi-arrow-left-circle"></i> Regresar
                         </button>
                     </div>
                 </div>

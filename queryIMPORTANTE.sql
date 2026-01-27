@@ -5,6 +5,9 @@
 
 -- Limpiar semana completa
 
+DELETE FROM asignaciones_servicio 
+WHERE fecha_servicio BETWEEN '2026-01-26' AND '2026-02-01';
+
 
 -- =====================================================
 -- SERVICIO DE SEMANA (7 días)
