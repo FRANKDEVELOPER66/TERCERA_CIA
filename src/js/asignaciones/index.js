@@ -274,23 +274,23 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
             }
 
             html += `
-        <div class="semana-card">
-            <div class="semana-header">
-                <h4><i class="bi bi-shield-fill"></i> Semana</h4>
-                <span class="badge bg-warning text-dark">7 días completos</span>
-            </div>
-            <div class="semana-content">
-                <div class="personnel-item-semana">
-                    <div>
-                        <strong>${gradoCompleto}</strong> ${s.nombre_completo}
+                <div class="semana-card">
+                    <div class="semana-header">
+                        <h4><i class="bi bi-shield-fill"></i> Semana</h4>
+                        <span class="badge bg-warning text-dark">7 días completos</span>
                     </div>
-                    <div class="text-muted">
-                        <i class="bi bi-clock"></i> Toda la semana
+                    <div class="semana-content">
+                        <div class="personnel-item-semana">
+                            <div>
+                                <strong>${gradoCompleto}</strong> ${s.nombre_completo}
+                            </div>
+                            <div class="text-muted">
+                                <i class="bi bi-clock"></i> Toda la semana
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </div>
-    `;
+            `;
         });
 
         html += `
@@ -332,13 +332,50 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                     <div class="row">
         `;
 
-        // Mostrar cada tipo de servicio
-        Object.keys(serviciosAgrupados).forEach(nombreServicio => {
+        // ⬇️ ORDEN FIJO DE SERVICIOS CON LAYOUT MEJORADO
+        const ordenServicios = [
+            'TACTICO',           // Fila 1 - Col 1
+            'TACTICO TROPA',     // Fila 1 - Col 2
+            'BANDERÍN',          // Fila 1 - Col 3
+            'RECONOCIMIENTO',    // Fila 2 - Col 1 (50%)
+            'SERVICIO NOCTURNO', // Fila 2 - Col 2 (50%)
+            'CUARTELERO'         // Fila 3 - debajo de nocturno (50%)
+        ];
+
+        // Mostrar cada tipo de servicio EN ORDEN
+        ordenServicios.forEach((nombreServicio) => {
+            if (!serviciosAgrupados[nombreServicio]) return; // Saltar si no existe
+
             const personal = serviciosAgrupados[nombreServicio];
             const claseServicio = nombreServicio.toLowerCase().replace(/\s+/g, '');
 
+            // ⬇️ DETERMINAR TAMAÑO DE COLUMNA Y BREAKS
+            let colSize = 'col-md-6 col-lg-4'; // Por defecto: 1/3 del ancho
+            let breakAfter = ''; // Para forzar saltos de línea
+
+            // Primera fila: TACTICO, TACTICO TROPA, BANDERÍN (33% cada uno)
+            if (nombreServicio === 'TACTICO' || nombreServicio === 'TACTICO TROPA' || nombreServicio === 'BANDERÍN') {
+                colSize = 'col-md-6 col-lg-4';
+                if (nombreServicio === 'BANDERÍN') {
+                    breakAfter = '<div class="w-100"></div>'; // Salto después de BANDERÍN
+                }
+            }
+
+            // Segunda fila: RECONOCIMIENTO y SERVICIO NOCTURNO (50% cada uno)
+            if (nombreServicio === 'RECONOCIMIENTO' || nombreServicio === 'SERVICIO NOCTURNO') {
+                colSize = 'col-md-6 col-lg-6';
+                if (nombreServicio === 'SERVICIO NOCTURNO') {
+                    breakAfter = '<div class="w-100"></div>'; // Salto después de NOCTURNO
+                }
+            }
+
+            // Tercera fila: CUARTELERO (50%, alineado a la derecha)
+            if (nombreServicio === 'CUARTELERO') {
+                colSize = 'col-md-6 col-lg-6 offset-lg-6'; // 50% + offset para alinearlo a la derecha
+            }
+
             html += `
-                <div class="col-md-6 col-lg-4">
+                <div class="${colSize}">
                     <div class="service-card ${claseServicio}">
                         <h4>
                             <i class="bi bi-shield-check"></i> 
@@ -353,7 +390,11 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                 if (nombreServicio === 'SERVICIO NOCTURNO') {
                     const turnos = ['PRIMER TURNO', 'SEGUNDO TURNO', 'TERCER TURNO'];
                     horarioTexto = turnos[index] || `TURNO ${index + 1}`;
+                } else if (nombreServicio === 'CUARTELERO') {
+                    // CUARTELERO no muestra horario
+                    horarioTexto = '';
                 } else {
+                    // Otros servicios muestran horario
                     horarioTexto = `${p.hora_inicio.substring(0, 5)} - ${p.hora_fin.substring(0, 5)}`;
                 }
 
@@ -364,28 +405,18 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                 }
 
                 html += `
-        <div class="personnel-item">
-            <span><strong>${gradoCompleto}</strong> ${p.nombre_completo}</span>
-            <span>${horarioTexto}</span>
-        </div>
-    `;
+                    <div class="personnel-item">
+                        <span><strong>${gradoCompleto}</strong> ${p.nombre_completo}</span>
+                        ${horarioTexto ? `<span>${horarioTexto}</span>` : ''}
+                    </div>
+                `;
             });
-
-            // ⬅️ AGREGAR SOLO ESTO DESPUÉS DEL forEach
-            if (nombreServicio === 'SERVICIO NOCTURNO' && serviciosAgrupados['CUARTELERO']) {
-                const cuartelero = serviciosAgrupados['CUARTELERO'][0];
-                html += `
-        <div class="personnel-item">
-            <span><strong>${cuartelero.grado}</strong> ${cuartelero.nombre_completo}</span>
-            <span>CUARTO TURNO</span>
-        </div>
-    `;
-            }
 
             html += `
                         </div>
                     </div>
                 </div>
+                ${breakAfter}
             `;
         });
 
@@ -499,7 +530,6 @@ btnGenerar.addEventListener('click', generarServicios);
 btnConsultar.addEventListener('click', consultarServicios);
 btnEliminarSemana.addEventListener('click', eliminarSemana);
 btnExportarPDF.addEventListener('click', exportarPDF);
-
 
 // Al final del archivo, agrega:
 document.getElementById('btnExportarPDF')?.addEventListener('click', function () {

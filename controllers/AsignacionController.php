@@ -273,7 +273,7 @@ class AsignacionController
 
                 $fecha_obj = new \DateTime($fecha_dia);
                 $dia_nombre = self::getNombreDia($fecha_obj->format('N'));
-                $fecha_formateada = $fecha_obj->format('d \d\e F \d\e Y');
+                $fecha_formateada = self::formatearFechaEspanol($fecha_obj);
 
                 // Agrupar servicios por tipo
                 $servicios_agrupados = [];
@@ -313,15 +313,42 @@ class AsignacionController
         }
     }
 
+    /**
+     * Formatea fecha en español
+     */
+    private static function formatearFechaEspanol($fecha_obj)
+    {
+        $meses = [
+            1 => 'enero',
+            2 => 'febrero',
+            3 => 'marzo',
+            4 => 'abril',
+            5 => 'mayo',
+            6 => 'junio',
+            7 => 'julio',
+            8 => 'agosto',
+            9 => 'septiembre',
+            10 => 'octubre',
+            11 => 'noviembre',
+            12 => 'diciembre'
+        ];
+
+        $dia = $fecha_obj->format('d');
+        $mes = $meses[(int)$fecha_obj->format('m')];
+        $anio = $fecha_obj->format('Y');
+
+        return "{$dia} de {$mes} de {$anio}";
+    }
+
     private static function generarPaginaDia($dia_nombre, $fecha_formateada, $oficial_dia, $servicios_agrupados)
     {
         $html = '
     <div style="border-bottom: 3px solid #2d5016; padding-bottom: 10px; margin-bottom: 20px;">
         <h2 style="color: #2d5016; margin: 0; text-align: center; font-size: 24px;">
-            3RA. CIA 2DO BTN BHR
+            SERVICIOS 3RA. CIA. 2DO. BTN. BHR.
         </h2>
         <h1 style="color: #ff7b00; margin: 10px 0; text-align: center; font-size: 20px;">
-            ' . strtoupper($dia_nombre) . ', ' . strtoupper($fecha_formateada) . '
+            PARA EL DÍA ' . strtoupper($dia_nombre) . ' ' . strtoupper($fecha_formateada) . '
         </h1>';
 
         if (!empty($oficial_dia)) {
@@ -334,10 +361,11 @@ class AsignacionController
         $html .= '</div>';
 
         // Orden de servicios
-        $orden_servicios = ['Semana', 'TACTICO', 'RECONOCIMIENTO', 'SERVICIO NOCTURNO', 'BANDERÍN', 'CUARTELERO'];
+        $orden_servicios = ['Semana', 'TACTICO', 'TACTICO TROPA', 'RECONOCIMIENTO', 'SERVICIO NOCTURNO', 'BANDERÍN', 'CUARTELERO'];
         $colores = [
             'Semana' => '#a03500ff',
             'TACTICO' => '#c85a28',
+            'TACTICO TROPA' => '#d4763b',
             'RECONOCIMIENTO' => '#2d5016',
             'SERVICIO NOCTURNO' => '#1a472a',
             'BANDERÍN' => '#b8540f',
@@ -359,8 +387,8 @@ class AsignacionController
             }
 
             $html .= '
-        <div style="background: ' . $color . '; color: white; border-radius: 12px; padding: 5px; margin-bottom: 15px;">
-    <h3 style="margin: 0 0 10px 0; font-size: 18px;">▶  ' . strtoupper($nombre_mostrar) . '</h3>';
+        <div style="background: ' . $color . '; color: white; border-radius: 12px; padding: 4px; margin-bottom: 5px;">
+    <h3 style="margin: 0 0 10px 0; font-size: 15px;">▶  ' . strtoupper($nombre_mostrar) . '</h3>';
 
             // ⬇️ SI ES SERVICIO NOCTURNO, ORDENAR Y NUMERAR
             if ($tipo_servicio === 'SERVICIO NOCTURNO') {
@@ -382,10 +410,10 @@ class AsignacionController
                     }
 
                     $html .= '
-                <div style="background: rgba(255,255,255,0.2); padding: 8px 12px; border-radius: 8px; margin-bottom: 5px;">
+                <div style="background: rgba(255,255,255,0.2); padding: 6px 10px; border-radius: 8px; margin-bottom: 5px;">
                     <strong>' . $grado_completo . '</strong> ' .
                         htmlspecialchars($persona['nombre_completo']) .
-                        '<span style="float: right; font-weight: bold; font-size: 14px;">' .
+                        '<span style="float: right; font-weight: bold; font-size: 15px;">' .
                         $turno_texto . '</span>
                 </div>';
                 }
@@ -415,12 +443,17 @@ class AsignacionController
     // === GENERAR CRONOGRAMA SEMANAL (ÚLTIMA PÁGINA) ===
     private static function generarCronogramaSemanal($asignaciones, $fecha_inicio)
     {
-        $fecha = new \DateTime($fecha_inicio);
+        $fecha_inicio_obj = new \DateTime($fecha_inicio);
+        $fecha_fin_obj = new \DateTime($fecha_inicio);
+        $fecha_fin_obj->modify('+6 days'); // Sumar 6 días para llegar al domingo
+
+        $fecha_inicio_formateada = self::formatearFechaEspanol($fecha_inicio_obj);
+        $fecha_fin_formateada = self::formatearFechaEspanol($fecha_fin_obj);
 
         $html = '
     <div style="text-align: center; margin-bottom: 20px;">
         <h1 style="color: #2d5016; margin: 0;">CRONOGRAMA SEMANAL</h1>
-        <h3 style="color: #ff7b00; margin: 5px 0;">Semana del ' . $fecha->format('d/m/Y') . '</h3>
+        <h3 style="color: #ff7b00; margin: 5px 0;">Del ' . $fecha_inicio_formateada . ' al ' . $fecha_fin_formateada . '</h3>
     </div>';
 
         // Agrupar por personal (permitir múltiples servicios por día)
@@ -435,7 +468,7 @@ class AsignacionController
                     'nombre' => $asig['nombre_completo'],
                     'grado' => $asig['grado'],
                     'servicios' => [],
-                    'tiene_semana' => false  // ⬅️ NUEVO FLAG
+                    'tiene_semana' => false  // ⬅️ FLAG PARA SEMANA
                 ];
 
                 // Inicializar cada día como array vacío
@@ -457,7 +490,6 @@ class AsignacionController
             // Agregar servicio (puede haber varios por día)
             $abrev = self::getAbreviatura($asig['servicio']);
 
-            // Si es servicio nocturno, agregar número de turno
             // Si es servicio nocturno, agregar número de turno
             if ($asig['servicio'] === 'SERVICIO NOCTURNO') {
                 $turno = self::obtenerNumeroTurno($asig, $asignaciones);
@@ -546,8 +578,22 @@ class AsignacionController
         <tbody>';
 
         $contador = 0;
+        $tipo_anterior = null;
+
         foreach ($personal_servicios as $persona) {
             $bgColor = ($contador % 2 == 0) ? '#f8f9fa' : '#ffffff';
+
+            // ⬇️ AGREGAR FILA DE SEPARACIÓN ENTRE ESPECIALISTAS Y TROPA
+            $tipo_actual = $persona['tipo'] ?? 'TROPA';
+
+            if ($tipo_anterior !== null && $tipo_anterior !== $tipo_actual) {
+                $html .= '
+            <tr>
+                <td colspan="9" style="background: #2d5016; height: 3px; padding: 0;"></td>
+            </tr>';
+            }
+
+            $tipo_anterior = $tipo_actual;
 
             // Contar total de servicios
             $total_servicios = 0;
@@ -613,13 +659,17 @@ class AsignacionController
         <table style="width: 100%; font-size: 9px;">
             <tr>
                 <td><strong style="color: #ff9966;">SEM</strong> = Semana (toda la semana)</td>
-                <td><strong style="color: #c85a28;">TACTICO</strong> = Táctico</td>
-                <td><strong style="color: #2d5016;">ERI</strong> = Reconocimiento</td>
+                <td><strong style="color: #c85a28;">TAC</strong> = Táctico (Especialista)</td>
+                <td><strong style="color: #d4763b;">TAC-T</strong> = Táctico Tropa</td>
             </tr>
             <tr>
+                <td><strong style="color: #2d5016;">RECO</strong> = Reconocimiento</td>
                 <td><strong style="color: #1a472a;">1ER/2DO/3ER TURNO</strong> = Servicio Nocturno</td>
-                <td><strong style="color: #b8540f;">BANDERIN</strong> = Banderín</td>
-                <td><strong style="color: #3d6b1f;">CUARTELERO</strong> = Cuartelero</td>
+                <td><strong style="color: #b8540f;">BAN</strong> = Banderín</td>
+            </tr>
+            <tr>
+                <td><strong style="color: #3d6b1f;">CUARTO TURNO</strong> = Cuartelero</td>
+                <td colspan="2"></td>
             </tr>
         </table>
     </div>';
@@ -665,6 +715,7 @@ class AsignacionController
         $abreviaturas = [
             'Semana' => 'SEM',
             'TACTICO' => 'TACTICO',
+            'TACTICO TROPA' => 'TAC-T',
             'RECONOCIMIENTO' => 'ERI',           // ⬅️ CAMBIAR de 'REC' a 'RECO'
             'SERVICIO NOCTURNO' => 'NOC',         // ⬅️ Este ya no se usa (se reemplaza con 1ER TURNO)
             'BANDERÍN' => 'BANDERIN',
@@ -675,7 +726,11 @@ class AsignacionController
 
     private static function getColorAbreviatura($abrev)
     {
-        // Extraer las primeras 3 letras (NOC1 → NOC)
+        // Para manejar TAC-T (TACTICO TROPA)
+        if (strpos($abrev, 'TAC-T') === 0) {
+            return '#d4763b';
+        }
+
         $servicio_base = substr($abrev, 0, 3);
 
         $colores = [
@@ -684,7 +739,8 @@ class AsignacionController
             'REC' => '#2d5016',
             'NOC' => '#1a472a',
             'BAN' => '#b8540f',
-            'CUA' => '#3d6b1f'
+            'CUA' => '#3d6b1f',
+            'QUA' => '#3d6b1f'  // Para CUARTO TURNO
         ];
 
         return $colores[$servicio_base] ?? '#000000';

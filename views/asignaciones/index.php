@@ -68,8 +68,7 @@
     }
 
     .service-card.tactico {
-        background: linear-gradient(135deg, #c85a28 0%, #d96c2f 100%);
-        /* Naranja oscuro */
+        background: #c85a28;
     }
 
     .service-card.reconocimiento {
@@ -87,9 +86,13 @@
         /* Naranja medio */
     }
 
+    .service-card.tacticotropa {
+        background: #d4763b;
+    }
+
     .service-card.cuartelero {
-        background: linear-gradient(135deg, #3d6b1f 0%, #508a25 100%);
-        /* Verde medio */
+        background: #652900ff;
+        /* Naranja más claro */
     }
 
 
@@ -239,8 +242,9 @@
     }
 
     .btn-export-pdf {
-    background: linear-gradient(135deg, #c85a28 0%, #b8540f 100%); /* Naranja oscuro */
-}
+        background: linear-gradient(135deg, #c85a28 0%, #b8540f 100%);
+        /* Naranja oscuro */
+    }
 
     .empty-state {
         text-align: center;

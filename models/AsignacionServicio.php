@@ -182,6 +182,11 @@ class AsignacionServicio extends ActiveRecord
             WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
             AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
         )
+        AND p.id_personal NOT IN (
+    SELECT id_personal FROM asignaciones_servicio 
+    WHERE fecha_servicio = :fecha_cuartelero
+    AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+)
     ORDER BY 
         veces_tactico ASC,
         COALESCE(hr.dias_desde_ultimo, 999) DESC,
@@ -193,7 +198,8 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_lunes' => $lunes_str,
             ':fecha_domingo' => $fecha_domingo,
             ':fecha_lunes_count' => $lunes_str,
-            ':fecha_domingo_count' => $fecha_domingo
+            ':fecha_domingo_count' => $fecha_domingo,
+            ':fecha_cuartelero' => $fecha  // ⬅️ AGREGAR ESTO
         ];
 
         error_log("=== DEBUG asignarTactico ===");
@@ -355,12 +361,18 @@ class AsignacionServicio extends ActiveRecord
                     SELECT id_personal FROM asignaciones_servicio 
                     WHERE fecha_servicio = :fecha2
                 )
+                AND p.id_personal NOT IN (
+    SELECT id_personal FROM asignaciones_servicio 
+    WHERE fecha_servicio = :fecha_cuartelero
+    AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+)
              ORDER BY g.orden ASC, RAND()
              LIMIT :cantidad",
                 array_merge([
                     ':fecha' => $fecha,
                     ':fecha2' => $fecha,
-                    ':cantidad' => $sargentos_necesarios
+                    ':cantidad' => $sargentos_necesarios,
+                    ':fecha_cuartelero' => $fecha
                 ], $params_excluir)
             );
 
@@ -630,7 +642,12 @@ class AsignacionServicio extends ActiveRecord
             SELECT id_personal FROM asignaciones_servicio 
             WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
             AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-        )   
+        )
+        AND p.id_personal NOT IN (
+    SELECT id_personal FROM asignaciones_servicio 
+    WHERE fecha_servicio = :fecha_cuartelero
+    AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+)   
     ORDER BY 
         COALESCE(hr.dias_desde_ultimo, 999) DESC,
         g.orden ASC,
@@ -642,7 +659,8 @@ class AsignacionServicio extends ActiveRecord
             ':fecha2' => $fecha,
             ':fecha3' => $fecha,
             ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo
+            ':fecha_domingo' => $fecha_domingo,
+            ':fecha_cuartelero' => $fecha
         ];
 
         error_log("=== DEBUG asignarBanderin ===");
@@ -677,8 +695,8 @@ class AsignacionServicio extends ActiveRecord
         $lunes_str = $fecha_lunes->format('Y-m-d');
         $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
 
+        // ⬇️ INTENTO 1: Buscar sin servicios ese día
         $sql = "SELECT p.id_personal,
-        -- Contar cuántas veces ha sido CUARTELERO esta semana
         (SELECT COUNT(*) 
          FROM asignaciones_servicio a_cua
          INNER JOIN tipos_servicio ts_cua ON a_cua.id_tipo_servicio = ts_cua.id_tipo_servicio
@@ -687,7 +705,14 @@ class AsignacionServicio extends ActiveRecord
          AND ts_cua.nombre = 'CUARTELERO'
         ) as veces_cuartelero_semana,
         
-        COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo
+        COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
+        
+        -- ⬇️ NUEVO: Contar servicios ese día
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_dia
+         WHERE a_dia.id_personal = p.id_personal 
+         AND a_dia.fecha_servicio = :fecha_check
+        ) as servicios_ese_dia
         
     FROM bhr_personal p
     INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
@@ -700,20 +725,19 @@ class AsignacionServicio extends ActiveRecord
         AND p.activo = 1
         AND cd.id_calendario IS NULL
         AND p.id_personal NOT IN (
-            -- Excluir quien tiene SEMANA
             SELECT id_personal FROM asignaciones_servicio 
             WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
             AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
         )
         AND p.id_personal NOT IN (
-            -- ⬅️ EXCLUSIÓN: No asignar si fue CUARTELERO en los últimos 2 días
             SELECT id_personal FROM asignaciones_servicio 
             WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
             AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
         )
     ORDER BY 
-        veces_cuartelero_semana ASC,  -- ⬅️ Prioridad: quien menos veces ha sido cuartelero
-        dias_ultimo DESC,              -- ⬅️ Luego: quien tiene más días sin hacerlo
+        servicios_ese_dia ASC,        -- ⬅️ PRIORIDAD: Quien NO tiene servicios ese día
+        veces_cuartelero_semana ASC,
+        dias_ultimo DESC,
         g.orden ASC,
         RAND()
     LIMIT 1";
@@ -722,6 +746,7 @@ class AsignacionServicio extends ActiveRecord
             ':fecha' => $fecha,
             ':fecha2' => $fecha,
             ':fecha3' => $fecha,
+            ':fecha_check' => $fecha,
             ':fecha_lunes' => $lunes_str,
             ':fecha_domingo' => $fecha_domingo,
             ':fecha_lunes_count' => $lunes_str,
@@ -734,14 +759,19 @@ class AsignacionServicio extends ActiveRecord
         $resultado = self::fetchFirst($sql, $params);
 
         if ($resultado) {
-            error_log("✅ CUARTELERO seleccionado: ID {$resultado['id_personal']} (Veces esta semana: {$resultado['veces_cuartelero_semana']}, Días desde último: {$resultado['dias_ultimo']})");
+            // ⬇️ VERIFICAR que no tenga servicios ese día (idealmente servicios_ese_dia debería ser 0)
+            if ($resultado['servicios_ese_dia'] == 0) {
+                error_log("✅ CUARTELERO seleccionado SIN otros servicios: ID {$resultado['id_personal']}");
+            } else {
+                error_log("⚠️ CUARTELERO seleccionado CON {$resultado['servicios_ese_dia']} servicios ese día: ID {$resultado['id_personal']}");
+            }
 
             return self::crearAsignacion(
                 $resultado['id_personal'],
                 'CUARTELERO',
                 $fecha,
-                '08:00:00',  // ⬅️ CAMBIAR de '00:00:00'
-                '07:45:00',  // ⬅️ CAMBIAR de '23:59:59'
+                '08:00:00',
+                '07:45:00',
                 $usuario_id,
                 $id_oficial
             );
