@@ -70,6 +70,15 @@ class AsignacionServicio extends ActiveRecord
                 throw new \Exception("No hay especialistas disponibles para TÁCTICO en {$fecha}");
             }
 
+            // ⬇️ NUEVO: 2.5 TÁCTICO TROPA (sargentos)
+            $tactico_tropa = self::asignarTacticoTropa($fecha, $usuario_id, $id_oficial);
+            if ($tactico_tropa && !is_array($tactico_tropa)) {
+                $asignaciones[] = $tactico_tropa;
+                error_log("✅ TÁCTICO TROPA asignado");
+            } else {
+                throw new \Exception("No hay sargentos disponibles para TÁCTICO TROPA en {$fecha}");
+            }
+
             // 3. RECONOCIMIENTO - AQUÍ PUEDE FALLAR
             error_log("⏳ Iniciando asignación de RECONOCIMIENTO...");
             $reconocimiento = self::asignarReconocimiento($fecha, $usuario_id, $id_oficial);
@@ -108,7 +117,7 @@ class AsignacionServicio extends ActiveRecord
             $fecha_obj = new \DateTime($fecha);
             $es_lunes = ($fecha_obj->format('N') == 1);
 
-            $total_esperado = $es_lunes ? 12 : 11;
+            $total_esperado = $es_lunes ? 13 : 12;
             $total_generado = count($asignaciones);
 
             error_log("📊 RESUMEN {$fecha}: {$total_generado}/{$total_esperado} asignaciones");
@@ -197,8 +206,83 @@ class AsignacionServicio extends ActiveRecord
                 $resultado['id_personal'],
                 'TACTICO',
                 $fecha,
-                '00:00:00',
-                '23:59:59',
+                '21:00:00',
+                '20:45:00',
+                $usuario_id,
+                $id_oficial
+            );
+        }
+
+        return null;
+    }
+
+
+
+    /**
+     * Asigna TÁCTICO TROPA (1 sargento disponible)
+     */
+    private static function asignarTacticoTropa($fecha, $usuario_id, $id_oficial = null)
+    {
+        $fecha_obj = new \DateTime($fecha);
+        $dia_semana = $fecha_obj->format('N');
+        $dias_desde_lunes = $dia_semana - 1;
+        $fecha_lunes = clone $fecha_obj;
+        $fecha_lunes->modify("-{$dias_desde_lunes} days");
+        $lunes_str = $fecha_lunes->format('Y-m-d');
+        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
+
+        $sql = "SELECT p.id_personal,
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_count 
+         INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
+         WHERE a_count.id_personal = p.id_personal 
+         AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
+         AND ts_count.nombre = 'TACTICO TROPA'
+        ) as veces_tactico_tropa
+    FROM bhr_personal p
+    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TACTICO TROPA')
+    WHERE p.tipo = 'TROPA'
+        AND g.nombre LIKE 'Sargento%'
+        AND p.activo = 1
+        AND cd.id_calendario IS NULL
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+        )
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio = :fecha_cuartelero
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+        )
+    ORDER BY 
+        veces_tactico_tropa ASC,
+        COALESCE(hr.dias_desde_ultimo, 999) DESC,
+        RAND()
+    LIMIT 1";
+
+        $params = [
+            ':fecha' => $fecha,
+            ':fecha_lunes' => $lunes_str,
+            ':fecha_domingo' => $fecha_domingo,
+            ':fecha_lunes_count' => $lunes_str,
+            ':fecha_domingo_count' => $fecha_domingo,
+            ':fecha_cuartelero' => $fecha
+        ];
+
+        $resultado = self::fetchFirst($sql, $params);
+
+        if ($resultado) {
+            return self::crearAsignacion(
+                $resultado['id_personal'],
+                'TACTICO TROPA',
+                $fecha,
+                '21:00:00',  // Mismo horario que TÁCTICO
+                '20:45:00',
                 $usuario_id,
                 $id_oficial
             );
@@ -301,7 +385,7 @@ class AsignacionServicio extends ActiveRecord
                 'RECONOCIMIENTO',
                 $fecha,
                 '06:00:00',
-                '12:00:00',
+                '18:00:00',
                 $usuario_id,
                 $id_oficial
             );
@@ -571,8 +655,8 @@ class AsignacionServicio extends ActiveRecord
                 $resultado['id_personal'],
                 'BANDERÍN',
                 $fecha,
-                '00:00:00',
-                '23:59:59',
+                '06:00:00',  // ⬅️ CAMBIAR de '00:00:00'
+                '20:00:00',  // ⬅️ CAMBIAR de '23:59:59'
                 $usuario_id,
                 $id_oficial
             );
@@ -656,8 +740,8 @@ class AsignacionServicio extends ActiveRecord
                 $resultado['id_personal'],
                 'CUARTELERO',
                 $fecha,
-                '00:00:00',
-                '23:59:59',
+                '08:00:00',  // ⬅️ CAMBIAR de '00:00:00'
+                '07:45:00',  // ⬅️ CAMBIAR de '23:59:59'
                 $usuario_id,
                 $id_oficial
             );

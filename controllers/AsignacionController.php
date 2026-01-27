@@ -360,7 +360,7 @@ class AsignacionController
 
             $html .= '
         <div style="background: ' . $color . '; color: white; border-radius: 12px; padding: 5px; margin-bottom: 15px;">
-    <h3 style="margin: 0 0 10px 0; font-size: 18px;">🛡️ ' . strtoupper($nombre_mostrar) . '</h3>';
+    <h3 style="margin: 0 0 10px 0; font-size: 18px;">▶  ' . strtoupper($nombre_mostrar) . '</h3>';
 
             // ⬇️ SI ES SERVICIO NOCTURNO, ORDENAR Y NUMERAR
             if ($tipo_servicio === 'SERVICIO NOCTURNO') {
@@ -434,7 +434,8 @@ class AsignacionController
                 $personal_servicios[$id] = [
                     'nombre' => $asig['nombre_completo'],
                     'grado' => $asig['grado'],
-                    'servicios' => []
+                    'servicios' => [],
+                    'tiene_semana' => false  // ⬅️ NUEVO FLAG
                 ];
 
                 // Inicializar cada día como array vacío
@@ -443,13 +444,32 @@ class AsignacionController
                 }
             }
 
+            // ⬇️ SI ES SEMANA, MARCAR EL FLAG Y LLENAR TODOS LOS DÍAS
+            if ($asig['servicio'] === 'Semana') {
+                $personal_servicios[$id]['tiene_semana'] = true;
+                // Llenar todos los días con SEM
+                for ($d = 1; $d <= 7; $d++) {
+                    $personal_servicios[$id]['servicios'][$d] = ['SEM'];
+                }
+                continue; // ⬅️ Saltar al siguiente servicio
+            }
+
             // Agregar servicio (puede haber varios por día)
             $abrev = self::getAbreviatura($asig['servicio']);
 
             // Si es servicio nocturno, agregar número de turno
+            // Si es servicio nocturno, agregar número de turno
             if ($asig['servicio'] === 'SERVICIO NOCTURNO') {
                 $turno = self::obtenerNumeroTurno($asig, $asignaciones);
-                $abrev = $abrev . $turno; // NOC1, NOC2, NOC3
+
+                // ⬇️ USAR TEXTO COMPLETO EN LUGAR DE ABREVIATURA
+                $turnos_texto = [
+                    1 => '1ER TURNO',
+                    2 => '2DO TURNO',
+                    3 => '3ER TURNO'
+                ];
+
+                $abrev = $turnos_texto[$turno] ?? 'TURNO ' . $turno;
             }
 
             $personal_servicios[$id]['servicios'][$dia_num][] = $abrev;
@@ -593,13 +613,13 @@ class AsignacionController
         <table style="width: 100%; font-size: 9px;">
             <tr>
                 <td><strong style="color: #ff9966;">SEM</strong> = Semana (toda la semana)</td>
-                <td><strong style="color: #c85a28;">TAC</strong> = Táctico</td>
-                <td><strong style="color: #2d5016;">REC</strong> = Reconocimiento</td>
+                <td><strong style="color: #c85a28;">TACTICO</strong> = Táctico</td>
+                <td><strong style="color: #2d5016;">ERI</strong> = Reconocimiento</td>
             </tr>
             <tr>
-                <td><strong style="color: #1a472a;">NOC1/2/3</strong> = Servicio Nocturno (Turno 1, 2 o 3)</td>
-                <td><strong style="color: #b8540f;">BAN</strong> = Banderín</td>
-                <td><strong style="color: #3d6b1f;">CUA</strong> = Cuartelero</td>
+                <td><strong style="color: #1a472a;">1ER/2DO/3ER TURNO</strong> = Servicio Nocturno</td>
+                <td><strong style="color: #b8540f;">BANDERIN</strong> = Banderín</td>
+                <td><strong style="color: #3d6b1f;">CUARTELERO</strong> = Cuartelero</td>
             </tr>
         </table>
     </div>';
@@ -644,11 +664,11 @@ class AsignacionController
     {
         $abreviaturas = [
             'Semana' => 'SEM',
-            'TACTICO' => 'TAC',  // ⬅️ SIN ACENTO
-            'RECONOCIMIENTO' => 'REC',
-            'SERVICIO NOCTURNO' => 'NOC',
-            'BANDERÍN' => 'BAN',
-            'CUARTELERO' => 'CUA'
+            'TACTICO' => 'TACTICO',
+            'RECONOCIMIENTO' => 'ERI',           // ⬅️ CAMBIAR de 'REC' a 'RECO'
+            'SERVICIO NOCTURNO' => 'NOC',         // ⬅️ Este ya no se usa (se reemplaza con 1ER TURNO)
+            'BANDERÍN' => 'BANDERIN',
+            'CUARTELERO' => 'CUARTELERO'        // ⬅️ CAMBIAR de 'CUA' a 'CUARTO TURNO'
         ];
         return $abreviaturas[$servicio] ?? '-';
     }

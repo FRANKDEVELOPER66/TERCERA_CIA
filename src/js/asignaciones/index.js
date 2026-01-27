@@ -267,24 +267,30 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
         `;
 
         serviciosSemana.forEach(s => {
+            // ⬇️ CONSTRUIR GRADO CON ESPECIALISTA
+            let gradoCompleto = s.grado;
+            if (s.tipo_personal === 'ESPECIALISTA') {
+                gradoCompleto += ' ESPECIALISTA';
+            }
+
             html += `
-                <div class="semana-card">
-                    <div class="semana-header">
-                        <h4><i class="bi bi-shield-fill"></i> Semana</h4>
-                        <span class="badge bg-warning text-dark">7 días completos</span>
+        <div class="semana-card">
+            <div class="semana-header">
+                <h4><i class="bi bi-shield-fill"></i> Semana</h4>
+                <span class="badge bg-warning text-dark">7 días completos</span>
+            </div>
+            <div class="semana-content">
+                <div class="personnel-item-semana">
+                    <div>
+                        <strong>${gradoCompleto}</strong> ${s.nombre_completo}
                     </div>
-                    <div class="semana-content">
-                        <div class="personnel-item-semana">
-                            <div>
-                                <strong>${s.grado}</strong> ${s.nombre_completo}
-                            </div>
-                            <div class="text-muted">
-                                <i class="bi bi-clock"></i> Toda la semana
-                            </div>
-                        </div>
+                    <div class="text-muted">
+                        <i class="bi bi-clock"></i> Toda la semana
                     </div>
                 </div>
-            `;
+            </div>
+        </div>
+    `;
         });
 
         html += `
@@ -351,9 +357,15 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                     horarioTexto = `${p.hora_inicio.substring(0, 5)} - ${p.hora_fin.substring(0, 5)}`;
                 }
 
+                // ⬇️ CONSTRUIR GRADO CON ESPECIALISTA
+                let gradoCompleto = p.grado;
+                if (p.tipo_personal === 'ESPECIALISTA') {
+                    gradoCompleto += ' ESPECIALISTA';
+                }
+
                 html += `
         <div class="personnel-item">
-            <span><strong>${p.grado}</strong> ${p.nombre_completo}</span>
+            <span><strong>${gradoCompleto}</strong> ${p.nombre_completo}</span>
             <span>${horarioTexto}</span>
         </div>
     `;
