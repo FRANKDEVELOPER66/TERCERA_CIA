@@ -3,6 +3,7 @@ import { Toast, validarFormulario } from "../funciones";
 import Swal from "sweetalert2";
 import DataTable from "datatables.net-bs5";
 import { lenguaje } from "../lenguaje";
+import * as bootstrap from 'bootstrap';
 
 const fechaInicio = document.getElementById('fechaInicio');
 const btnGenerar = document.getElementById('btnGenerar');
@@ -13,45 +14,114 @@ const btnRegresar = document.getElementById('btnRegresar');
 const contenedorResultados = document.getElementById('contenedorResultados');
 const loadingOverlay = document.getElementById('loadingOverlay');
 
+// Referencias al modal de grupos
+const modalSeleccionGrupos = new bootstrap.Modal(document.getElementById('modalSeleccionGrupos'));
+const btnConfirmarGeneracion = document.getElementById('btnConfirmarGeneracion');
+const fechaSemanaModal = document.getElementById('fechaSemanaModal');
+
 // Estado de la vista
-let estadoVista = 'seleccion'; // 'seleccion', 'consultando', 'generando'
+let estadoVista = 'seleccion';
 
-// Establecer el próximo lunes como fecha por defecto
-//const establecerProximoLunes = () => {
-//    const hoy = new Date();
-//    const diaSemana = hoy.getDay(); // 0 = Domingo, 1 = Lunes, etc.
-//
-//    let diasHastaLunes = 0;
-//    if (diaSemana === 0) { // Domingo
-//        diasHastaLunes = 1;
-//    } else if (diaSemana !== 1) { // No es lunes
-//        diasHastaLunes = 8 - diaSemana;
-//    }
-//
-//    const proximoLunes = new Date(hoy);
-//   proximoLunes.setDate(hoy.getDate() + diasHastaLunes);
-//
-//    const year = proximoLunes.getFullYear();
-//    const month = String(proximoLunes.getMonth() + 1).padStart(2, '0');
-//    const day = String(proximoLunes.getDate()).padStart(2, '0');
-//
-//    fechaInicio.value = `${year}-${month}-${day}`;
-//};
+// ========================================
+// ✨ FUNCIONES DE PRESETS DE ROTACIÓN
+// ========================================
 
-// Validar que sea lunes
-const validarLunes = (fecha) => {
-    const date = new Date(fecha + 'T00:00:00');
-    return date.getDay() === 1; // 1 = Lunes
+const aplicarPreset = (tipo) => {
+    const botones = document.querySelectorAll('.btn-grupo');
+
+    switch (tipo) {
+        case 'todos':
+            // Marcar todos los grupos
+            botones.forEach(btn => btn.classList.add('active'));
+            break;
+
+        case 'rotacion_a':
+            // Solo B y C disponibles (A descansa)
+            // Grupos A: 1 (Ofc), 4 (Esp), 7 (Trp)
+            botones.forEach(btn => {
+                const grupo = parseInt(btn.dataset.grupo);
+                if ([1, 4, 7].includes(grupo)) {
+                    btn.classList.remove('active');
+                } else {
+                    btn.classList.add('active');
+                }
+            });
+            break;
+
+        case 'rotacion_b':
+            // Solo A y C disponibles (B descansa)
+            // Grupos B: 2 (Ofc), 5 (Esp), 8 (Trp)
+            botones.forEach(btn => {
+                const grupo = parseInt(btn.dataset.grupo);
+                if ([2, 5, 8].includes(grupo)) {
+                    btn.classList.remove('active');
+                } else {
+                    btn.classList.add('active');
+                }
+            });
+            break;
+
+        case 'rotacion_c':
+            // Solo A y B disponibles (C descansa)
+            // Grupos C: 3 (Ofc), 6 (Esp), 9 (Trp)
+            botones.forEach(btn => {
+                const grupo = parseInt(btn.dataset.grupo);
+                if ([3, 6, 9].includes(grupo)) {
+                    btn.classList.remove('active');
+                } else {
+                    btn.classList.add('active');
+                }
+            });
+            break;
+
+        case 'ninguno':
+            // Desmarcar todos
+            botones.forEach(btn => btn.classList.remove('active'));
+            break;
+    }
+
+    // Actualizar conteo después de aplicar preset
+    actualizarConteoPersonal();
 };
 
-// Mostrar/ocultar loading
+// ========================================
+// ✨ INICIALIZACIÓN DE EVENT LISTENERS
+// ========================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Event listeners para botones de grupos individuales
+    const botonesGrupo = document.querySelectorAll('.btn-grupo');
+    botonesGrupo.forEach(btn => {
+        btn.addEventListener('click', function () {
+            this.classList.toggle('active');
+            actualizarConteoPersonal();
+        });
+    });
+
+    // Event listeners para botones de presets
+    const botonesPreset = document.querySelectorAll('.preset-btn');
+    botonesPreset.forEach(btn => {
+        btn.addEventListener('click', function () {
+            const preset = this.dataset.preset;
+            aplicarPreset(preset);
+        });
+    });
+});
+
+// ========================================
+// FUNCIONES BÁSICAS
+// ========================================
+
+const validarLunes = (fecha) => {
+    const date = new Date(fecha + 'T00:00:00');
+    return date.getDay() === 1;
+};
+
 const mostrarLoading = (mostrar) => {
     loadingOverlay.style.display = mostrar ? 'flex' : 'none';
 };
 
-// ✨ NUEVA FUNCIÓN: Gestionar visibilidad de botones según contexto
 const gestionarBotones = (contexto) => {
-    // Ocultar todos primero
     btnGenerar.style.display = 'none';
     btnConsultar.style.display = 'none';
     btnEliminarSemana.style.display = 'none';
@@ -60,46 +130,35 @@ const gestionarBotones = (contexto) => {
 
     switch (contexto) {
         case 'semana_existente':
-            // Hay servicios generados: solo consultar
             btnConsultar.style.display = '';
             estadoVista = 'seleccion';
             break;
-
         case 'semana_nueva':
-            // No hay servicios: solo generar
             btnGenerar.style.display = '';
             estadoVista = 'seleccion';
             break;
-
         case 'consultando':
-            // Viendo servicios existentes: exportar PDF y regresar
             btnExportarPDF.style.display = '';
             btnRegresar.style.display = '';
             estadoVista = 'consultando';
             break;
-
         case 'generado_nuevo':
-            // Recién generados: exportar PDF, eliminar y regresar
             btnExportarPDF.style.display = '';
             btnEliminarSemana.style.display = '';
             btnRegresar.style.display = '';
             estadoVista = 'generando';
             break;
-
         case 'inicial':
-            // Estado inicial: ocultar todo hasta que seleccionen
             estadoVista = 'seleccion';
             break;
     }
 };
 
-// ✨ NUEVA FUNCIÓN: Verificar si existe una semana en BD
 const verificarSemanaExistente = async (fecha) => {
     try {
         const url = `/TERCERA_CIA/API/asignaciones/obtener?fecha_inicio=${fecha}`;
         const respuesta = await fetch(url);
         const data = await respuesta.json();
-
         return data.codigo === 1 && data.datos && data.datos.length > 0;
     } catch (error) {
         console.error('Error al verificar semana:', error);
@@ -107,7 +166,6 @@ const verificarSemanaExistente = async (fecha) => {
     }
 };
 
-// ✨ NUEVA FUNCIÓN: Manejar cambio de fecha
 const manejarCambioFecha = async () => {
     const fecha = fechaInicio.value;
 
@@ -128,7 +186,6 @@ const manejarCambioFecha = async () => {
         return;
     }
 
-    // Verificar si ya existe
     mostrarLoading(true);
     const existe = await verificarSemanaExistente(fecha);
     mostrarLoading(false);
@@ -139,7 +196,6 @@ const manejarCambioFecha = async () => {
         gestionarBotones('semana_nueva');
     }
 
-    // Limpiar resultados si había algo
     if (estadoVista === 'seleccion') {
         contenedorResultados.innerHTML = `
             <div class="empty-state">
@@ -151,7 +207,6 @@ const manejarCambioFecha = async () => {
     }
 };
 
-// ✨ NUEVA FUNCIÓN: Regresar a selección
 const regresarASeleccion = () => {
     contenedorResultados.innerHTML = `
         <div class="empty-state">
@@ -160,13 +215,79 @@ const regresarASeleccion = () => {
             <p>Elige un lunes y genera o consulta los servicios</p>
         </div>
     `;
-
-    // Re-verificar el estado de la fecha actual
     manejarCambioFecha();
 };
 
-// Generar servicios de una semana
-const generarServicios = async () => {
+// ========================================
+// ✨ FUNCIONES DEL MODAL DE GRUPOS
+// ========================================
+
+const obtenerGruposSeleccionados = () => {
+    const botonesActivos = document.querySelectorAll('.btn-grupo.active');
+    const grupos = [];
+
+    botonesActivos.forEach(btn => {
+        grupos.push(parseInt(btn.dataset.grupo));
+    });
+
+    return grupos;
+};
+
+const actualizarConteoPersonal = async () => {
+    const gruposSeleccionados = obtenerGruposSeleccionados();
+
+    if (gruposSeleccionados.length === 0) {
+        document.getElementById('resumenSeleccion').style.display = 'none';
+        return;
+    }
+
+    try {
+        const response = await fetch('/TERCERA_CIA/API/asignaciones/contar-personal', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ grupos: gruposSeleccionados })
+        });
+
+        const data = await response.json();
+
+        if (data.codigo === 1) {
+            const resumen = document.getElementById('resumenSeleccion');
+            const conteo = document.getElementById('conteoPersonal');
+
+            conteo.innerHTML = `
+                <div class="row text-center">
+                    <div class="col-4">
+                        <strong style="color: #9B59B6;">👮 Oficiales:</strong> ${data.oficiales || 0}
+                    </div>
+                    <div class="col-4">
+                        <strong style="color: #ff6b6b;">🔧 Especialistas:</strong> ${data.especialistas || 0}
+                    </div>
+                    <div class="col-4">
+                        <strong style="color: #4ECDC4;">🎖️ Tropa:</strong> ${data.tropa || 0}
+                    </div>
+                </div>
+                <hr>
+                <div class="text-center">
+                    <strong>Total disponible: ${data.total || 0} personas</strong>
+                </div>
+            `;
+
+            resumen.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error al contar personal:', error);
+    }
+};
+
+// ========================================
+// GENERAR SERVICIOS
+// ========================================
+
+btnGenerar.addEventListener('click', (e) => {
+    e.preventDefault();
+
     const fecha = fechaInicio.value;
 
     if (!fecha) {
@@ -188,18 +309,39 @@ const generarServicios = async () => {
         return;
     }
 
+    fechaSemanaModal.textContent = formatearFecha(fecha);
+    modalSeleccionGrupos.show();
+    actualizarConteoPersonal();
+});
+
+btnConfirmarGeneracion.addEventListener('click', async () => {
+    const fecha = fechaInicio.value;
+    const gruposSeleccionados = obtenerGruposSeleccionados();
+
+    if (gruposSeleccionados.length === 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Sin grupos seleccionados',
+            text: 'Debe seleccionar al menos un grupo para generar servicios'
+        });
+        return;
+    }
+
+    modalSeleccionGrupos.hide();
+
     const confirmacion = await Swal.fire({
         icon: 'question',
         title: '¿Generar servicios?',
         html: `
-        <p>Se generarán los servicios para la semana del</p>
-        <p><strong>${formatearFecha(fecha)}</strong></p>
-        <hr style="margin: 1.5rem 0; border-top: 2px solid #e2e8f0;">
-        <p style="color: #ff6b6b; font-weight: 600; margin-top: 1rem;">
-            <i class="bi bi-exclamation-triangle-fill"></i> 
-            Importante: Esta acción solo puede realizarse una vez. Al generar la semana, no podrá crear otra posteriormente.
-        </p>
-    `,
+            <p>Se generarán los servicios para la semana del:</p>
+            <p><strong>${formatearFecha(fecha)}</strong></p>
+            <p><strong>${gruposSeleccionados.length} grupos seleccionados</strong></p>
+            <hr style="margin: 1.5rem 0; border-top: 2px solid #e2e8f0;">
+            <p style="color: #ff6b6b; font-weight: 600; margin-top: 1rem;">
+                <i class="bi bi-exclamation-triangle-fill"></i> 
+                Recuerde que el personal que está en otra comision que no sea Descanso, debe ser desactivado desde el panel de Gestión de Personal antes de generar los servicios.
+            </p>
+        `,
         showCancelButton: true,
         confirmButtonText: 'Sí, generar',
         cancelButtonText: 'Cancelar',
@@ -208,11 +350,16 @@ const generarServicios = async () => {
 
     if (!confirmacion.isConfirmed) return;
 
+    await generarServiciosConGrupos(fecha, gruposSeleccionados);
+});
+
+const generarServiciosConGrupos = async (fecha, grupos) => {
     try {
         mostrarLoading(true);
 
         const body = new FormData();
         body.append('fecha_inicio', fecha);
+        body.append('grupos_disponibles', JSON.stringify(grupos));
 
         const url = "/TERCERA_CIA/API/asignaciones/generar";
         const config = {
@@ -229,17 +376,13 @@ const generarServicios = async () => {
         try {
             data = JSON.parse(text);
         } catch (e) {
+            mostrarLoading(false);
             throw new Error('La respuesta NO es JSON, revisa la consola');
         }
 
         if (data.debug) {
             console.log('=== DEBUG COMPLETO ===');
             console.log(data.debug);
-
-            if (data.debug.logs) {
-                console.log('=== LOGS DE ASIGNACIÓN ===');
-                console.log(data.debug.logs);
-            }
         }
 
         if (data.errores && data.errores.length > 0) {
@@ -247,33 +390,34 @@ const generarServicios = async () => {
             data.errores.forEach(error => {
                 console.log(`Fecha: ${error.fecha}`);
                 console.log(`Error: ${error.error}`);
-
-                if (error.logs) {
-                    console.log('Logs:', error.logs);
-                }
             });
         }
 
-        mostrarLoading(false);
-
         if (data.codigo === 1) {
-            Toast.fire({
-                icon: 'success',
-                title: data.mensaje
-            });
-
-            // ✅ SOLUCIÓN: Consultar los datos recién generados
             const datosGenerados = await consultarServiciosSinUI(fecha);
 
+            mostrarLoading(false);
+
             if (datosGenerados && datosGenerados.length > 0) {
+                Toast.fire({
+                    icon: 'success',
+                    title: data.mensaje
+                });
+
                 mostrarServicios(datosGenerados, fecha);
                 gestionarBotones('generado_nuevo');
             } else {
-                // Fallback: si no se obtienen datos, recargar
-                console.warn('No se obtuvieron datos, recargando...');
-                await consultarServicios();
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Servicios generados',
+                    text: 'Los servicios se generaron pero no se pudieron mostrar. Refresque la página.',
+                    confirmButtonText: 'Recargar página'
+                }).then(() => {
+                    window.location.reload();
+                });
             }
         } else {
+            mostrarLoading(false);
             Swal.fire({
                 icon: 'error',
                 title: 'Error',
@@ -294,7 +438,10 @@ const generarServicios = async () => {
     }
 };
 
-// Consultar servicios de una semana
+// ========================================
+// CONSULTAR SERVICIOS
+// ========================================
+
 const consultarServicios = async () => {
     const fecha = fechaInicio.value;
 
@@ -327,7 +474,7 @@ const consultarServicios = async () => {
 
         if (data.codigo === 1 && data.datos.length > 0) {
             mostrarServicios(data.datos, fecha);
-            gestionarBotones('consultando'); // ✨ Cambio de contexto
+            gestionarBotones('consultando');
         } else {
             contenedorResultados.innerHTML = `
                 <div class="empty-state">
@@ -349,8 +496,6 @@ const consultarServicios = async () => {
     }
 };
 
-
-// ✨ NUEVA FUNCIÓN: Consultar servicios sin mostrar UI (solo obtener datos)
 const consultarServiciosSinUI = async (fecha) => {
     try {
         const url = `/TERCERA_CIA/API/asignaciones/obtener?fecha_inicio=${fecha}`;
@@ -360,7 +505,6 @@ const consultarServiciosSinUI = async (fecha) => {
         if (data.codigo === 1 && data.datos && data.datos.length > 0) {
             return data.datos;
         }
-
         return null;
     } catch (error) {
         console.error('Error al consultar servicios:', error);
@@ -381,11 +525,9 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
         return;
     }
 
-    // Separar SEMANA del resto
     const serviciosSemana = asignaciones.filter(a => a.servicio === 'Semana');
     const serviciosDiarios = asignaciones.filter(a => a.servicio !== 'Semana');
 
-    // Agrupar por fecha
     const serviciosPorDia = {};
     serviciosDiarios.forEach(asig => {
         if (!serviciosPorDia[asig.fecha_servicio]) {
@@ -394,7 +536,6 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
         serviciosPorDia[asig.fecha_servicio].push(asig);
     });
 
-    // Agrupar asignaciones por servicio dentro de cada día
     const agruparPorServicio = (asignaciones) => {
         const grupos = {};
         asignaciones.forEach(asig => {
@@ -406,10 +547,8 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
         return grupos;
     };
 
-    // Generar HTML
     let html = '';
 
-    // ============ SECCIÓN DE SEMANA (ARRIBA) ============
     if (serviciosSemana.length > 0) {
         html += `
             <div class="row mb-4">
@@ -454,7 +593,6 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
         `;
     }
 
-    // ============ SERVICIOS DIARIOS (ABAJO) ============
     html += '<div class="row">';
 
     Object.keys(serviciosPorDia).sort().forEach(fecha => {
@@ -574,7 +712,10 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
     contenedorResultados.innerHTML = html;
 };
 
-// Eliminar servicios de una semana
+// ========================================
+// ELIMINAR SEMANA
+// ========================================
+
 const eliminarSemana = async () => {
     const fecha = fechaInicio.value;
 
@@ -606,9 +747,6 @@ const eliminarSemana = async () => {
         const respuesta = await fetch(url, config);
         const textoRespuesta = await respuesta.text();
 
-        console.log('=== RESPUESTA RAW DEL SERVIDOR ===');
-        console.log(textoRespuesta);
-
         mostrarLoading(false);
 
         let data;
@@ -619,13 +757,7 @@ const eliminarSemana = async () => {
             Swal.fire({
                 icon: 'error',
                 title: 'Error del servidor',
-                html: `
-                    <p>El servidor devolvió un error. Revisa la consola (F12)</p>
-                    <details>
-                        <summary>Ver error</summary>
-                        <pre style="text-align: left; font-size: 10px; max-height: 300px; overflow: auto;">${textoRespuesta.substring(0, 1000)}</pre>
-                    </details>
-                `
+                html: `<p>El servidor devolvió un error. Revisa la consola (F12)</p>`
             });
             return;
         }
@@ -635,8 +767,7 @@ const eliminarSemana = async () => {
                 icon: 'success',
                 title: data.mensaje
             });
-
-            regresarASeleccion(); // ✨ Regresar a selección después de eliminar
+            regresarASeleccion();
         } else {
             Swal.fire({
                 icon: 'error',
@@ -655,7 +786,10 @@ const eliminarSemana = async () => {
     }
 };
 
-// Exportar a PDF
+// ========================================
+// EXPORTAR PDF
+// ========================================
+
 const exportarPDF = () => {
     const fechaSeleccionada = fechaInicio.value;
 
@@ -679,14 +813,19 @@ const formatearFecha = (fecha) => {
     return date.toLocaleDateString('es-ES', opciones);
 };
 
-// Event Listeners
-btnGenerar.addEventListener('click', generarServicios);
+// ========================================
+// EVENT LISTENERS
+// ========================================
+
 btnConsultar.addEventListener('click', consultarServicios);
 btnEliminarSemana.addEventListener('click', eliminarSemana);
 btnExportarPDF.addEventListener('click', exportarPDF);
-btnRegresar.addEventListener('click', regresarASeleccion); // ✨ Nuevo
-fechaInicio.addEventListener('change', manejarCambioFecha); // ✨ Nuevo
+btnRegresar.addEventListener('click', regresarASeleccion);
+fechaInicio.addEventListener('change', manejarCambioFecha);
 
-// Inicializar
-//establecerProximoLunes();
+// ========================================
+// INICIALIZAR
+// ========================================
+
 gestionarBotones('inicial');
+fechaInicio.value = '';

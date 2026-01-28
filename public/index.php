@@ -30,6 +30,9 @@ $router->post('/API/asignaciones/eliminar', [AsignacionController::class, 'elimi
 $router->get('/API/asignaciones/pdf', [AsignacionController::class, 'exportarPDFSemanaAPI']);
 $router->get('/asignaciones/exportar-pdf', [AsignacionController::class, 'exportarPDF']);
 $router->get('/asignaciones/debug', [AsignacionController::class, 'debugAsignaciones']);
+$router->get('/asignaciones/debug', [AsignacionController::class, 'debugAsignaciones']);
+// ✅ Debe estar EXACTAMENTE así:
+$router->post('/API/asignaciones/contar-personal', [AsignacionController::class, 'contarPersonalAPI']);
 
 
 // Comprueba y valida las rutas

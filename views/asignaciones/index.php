@@ -377,6 +377,187 @@
             <p>Elige un lunes y genera los servicios para visualizarlos aquí</p>
         </div>
     </div>
+
+    <!-- ✨ MODAL COMPLETO CON BOTONES TOGGLE Y PRESETS DE ROTACIÓN -->
+    <div class="modal fade" id="modalSeleccionGrupos" tabindex="-1" aria-labelledby="modalSeleccionGruposLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%); color: white;">
+                    <h5 class="modal-title" id="modalSeleccionGruposLabel">
+                        <i class="bi bi-calendar-week"></i> Seleccionar Grupos Disponibles
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <!-- Fecha seleccionada -->
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>Semana a generar:</strong> <span id="fechaSemanaModal">-</span>
+                    </div>
+
+                    <!-- ✨ PRESETS DE ROTACIÓN RÁPIDA -->
+                    <div class="alert alert-primary">
+                        <h6><i class="bi bi-lightning-fill"></i> Selección Rápida:</h6>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button type="button" class="btn btn-sm btn-primary preset-btn" data-preset="todos">
+                                <i class="bi bi-check-all"></i> Todos Disponibles
+                            </button>
+                            <button type="button" class="btn btn-sm btn-warning preset-btn" data-preset="rotacion_a">
+                                <i class="bi bi-arrow-repeat"></i> Grupo A Descanso
+                            </button>
+                            <button type="button" class="btn btn-sm btn-warning preset-btn" data-preset="rotacion_b">
+                                <i class="bi bi-arrow-repeat"></i> Grupo B Descanso
+                            </button>
+                            <button type="button" class="btn btn-sm btn-warning preset-btn" data-preset="rotacion_c">
+                                <i class="bi bi-arrow-repeat"></i> Grupo C Descanso
+                            </button>
+                            <button type="button" class="btn btn-sm btn-danger preset-btn" data-preset="ninguno">
+                                <i class="bi bi-x-circle"></i> Desmarcar Todos
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Instrucciones -->
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Importante:</strong> Selecciona los grupos que estarán <strong>DISPONIBLES</strong> para servicios.
+                        Los grupos desmarcados estarán de descanso.
+                    </div>
+
+                    <!-- OFICIALES -->
+                    <div class="grupo-categoria mb-4">
+                        <div class="grupo-header" style="background: #9B59B6; color: white; padding: 12px; border-radius: 8px; margin-bottom: 15px;">
+                            <h6 class="mb-0">
+                                <i class="bi bi-star-fill"></i> OFICIALES
+                            </h6>
+                        </div>
+                        <div class="btn-group-toggle d-flex gap-2" data-toggle="buttons">
+                            <button type="button" class="btn btn-outline-primary btn-grupo active flex-fill" data-grupo="1">
+                                <i class="bi bi-check-circle-fill"></i> Grupo A
+                            </button>
+                            <button type="button" class="btn btn-outline-primary btn-grupo active flex-fill" data-grupo="2">
+                                <i class="bi bi-check-circle-fill"></i> Grupo B
+                            </button>
+                            <button type="button" class="btn btn-outline-primary btn-grupo active flex-fill" data-grupo="3">
+                                <i class="bi bi-check-circle-fill"></i> Grupo C
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- ESPECIALISTAS -->
+                    <div class="grupo-categoria mb-4">
+                        <div class="grupo-header" style="background: #ff6b6b; color: white; padding: 12px; border-radius: 8px; margin-bottom: 15px;">
+                            <h6 class="mb-0">
+                                <i class="bi bi-tools"></i> ESPECIALISTAS
+                            </h6>
+                        </div>
+                        <div class="btn-group-toggle d-flex gap-2" data-toggle="buttons">
+                            <button type="button" class="btn btn-outline-danger btn-grupo active flex-fill" data-grupo="4">
+                                <i class="bi bi-check-circle-fill"></i> Grupo A
+                            </button>
+                            <button type="button" class="btn btn-outline-danger btn-grupo active flex-fill" data-grupo="5">
+                                <i class="bi bi-check-circle-fill"></i> Grupo B
+                            </button>
+                            <button type="button" class="btn btn-outline-danger btn-grupo active flex-fill" data-grupo="6">
+                                <i class="bi bi-check-circle-fill"></i> Grupo C
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- TROPA -->
+                    <div class="grupo-categoria mb-4">
+                        <div class="grupo-header" style="background: #4ECDC4; color: white; padding: 12px; border-radius: 8px; margin-bottom: 15px;">
+                            <h6 class="mb-0">
+                                <i class="bi bi-people-fill"></i> TROPA
+                            </h6>
+                        </div>
+                        <div class="btn-group-toggle d-flex gap-2" data-toggle="buttons">
+                            <button type="button" class="btn btn-outline-info btn-grupo active flex-fill" data-grupo="7">
+                                <i class="bi bi-check-circle-fill"></i> Grupo A
+                            </button>
+                            <button type="button" class="btn btn-outline-info btn-grupo active flex-fill" data-grupo="8">
+                                <i class="bi bi-check-circle-fill"></i> Grupo B
+                            </button>
+                            <button type="button" class="btn btn-outline-info btn-grupo active flex-fill" data-grupo="9">
+                                <i class="bi bi-check-circle-fill"></i> Grupo C
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Resumen -->
+                    <div class="alert alert-success" id="resumenSeleccion" style="display: none;">
+                        <strong><i class="bi bi-check-circle"></i> Personal disponible:</strong>
+                        <div id="conteoPersonal" class="mt-2"></div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-circle"></i> Cancelar
+                    </button>
+                    <button type="button" class="btn btn-generate" id="btnConfirmarGeneracion">
+                        <i class="bi bi-lightning-charge-fill"></i> Generar Servicios
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        /* Estilos para botones toggle */
+        .btn-grupo {
+            padding: 12px 20px;
+            font-weight: 600;
+            border-width: 2px;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .btn-grupo i {
+            margin-right: 5px;
+            display: none;
+        }
+
+        .btn-grupo.active i {
+            display: inline;
+        }
+
+        .btn-grupo.active {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn-grupo:not(.active) {
+            opacity: 0.5;
+        }
+
+        .btn-grupo:hover {
+            transform: scale(1.05);
+        }
+
+        .grupo-categoria {
+            border-left: 4px solid transparent;
+            padding-left: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .grupo-categoria:hover {
+            background: rgba(0, 0, 0, 0.02);
+            border-radius: 8px;
+        }
+
+        /* Botones de preset */
+        .preset-btn {
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .preset-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+    </style>
 </div>
 
 <!-- Loading Overlay -->

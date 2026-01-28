@@ -22,17 +22,35 @@ class AsignacionController
      * Genera asignaciones para una semana completa
      */
     // En AsignacionController.php
+    /**
+     * ✨ MODIFICACIÓN: Recibir grupos disponibles desde el frontend
+     * Genera asignaciones para una semana completa
+     */
+    /**
+     * Genera asignaciones para una semana completa
+     * ✅ VERSIÓN CORREGIDA - Usa AsignacionServicio:: en lugar de self::
+     */
     public static function generarSemanaAPI()
     {
         header('Content-Type: application/json; charset=UTF-8');
 
-        // ⬇️ CAPTURAR LOGS EN MEMORIA
         ob_start();
 
         $debug = [];
         $debug['paso_1'] = 'Iniciando proceso';
 
         $fecha_inicio = $_POST['fecha_inicio'] ?? '';
+
+        // ✨ NUEVO: Recibir grupos disponibles
+        $grupos_json = $_POST['grupos_disponibles'] ?? '[]';
+        $grupos_disponibles = json_decode($grupos_json, true);
+
+        if (!is_array($grupos_disponibles)) {
+            $grupos_disponibles = [];
+        }
+
+        $debug['grupos_recibidos'] = $grupos_disponibles;
+        error_log("🎯 Grupos disponibles recibidos: " . json_encode($grupos_disponibles));
 
         if (empty($fecha_inicio)) {
             http_response_code(400);
@@ -42,6 +60,21 @@ class AsignacionController
                 'debug' => $debug
             ], JSON_UNESCAPED_UNICODE);
             return;
+        }
+
+        // ✨ VALIDACIÓN: Si no hay grupos, usar todos por defecto
+        if (empty($grupos_disponibles)) {
+            error_log("⚠️ No se especificaron grupos, usando todos por defecto");
+
+            // ✅ CORRECCIÓN: Usar AsignacionServicio:: en lugar de self::
+            $todos_grupos = AsignacionServicio::fetchArray("SELECT id_grupo FROM grupos_descanso", []);
+            $grupos_disponibles = array_map(function ($g) {
+                return $g['id_grupo'];
+            }, $todos_grupos);
+
+            $debug['grupos_usados'] = 'Todos (sin filtro)';
+        } else {
+            $debug['grupos_usados'] = $grupos_disponibles;
         }
 
         try {
@@ -58,9 +91,13 @@ class AsignacionController
 
             $usuario_id = $_SESSION['user_id'] ?? null;
 
-            $resultado = AsignacionServicio::generarAsignacionesSemanal($fecha_inicio, $usuario_id);
+            // ✨ MODIFICADO: Pasar grupos disponibles al generador
+            $resultado = AsignacionServicio::generarAsignacionesSemanal(
+                $fecha_inicio,
+                $usuario_id,
+                $grupos_disponibles
+            );
 
-            // ⬇️ CAPTURAR LOGS DE ERROR_LOG
             $logs_output = ob_get_clean();
             $debug['logs_php'] = $logs_output;
 
@@ -72,6 +109,7 @@ class AsignacionController
                     'datos' => $resultado['asignaciones'],
                     'total_generadas' => count($resultado['asignaciones']),
                     'detalle_por_dia' => $resultado['detalle_por_dia'] ?? [],
+                    'grupos_usados' => $grupos_disponibles,
                     'debug' => array_merge($resultado['debug'], ['logs' => $logs_output])
                 ], JSON_UNESCAPED_UNICODE);
             } else {
@@ -97,6 +135,109 @@ class AsignacionController
         }
     }
 
+    /**
+     * ✨ NUEVO ENDPOINT: Contar personal disponible por grupos
+     * Ruta: /API/asignaciones/contar-personal
+     */
+    /**
+     * ✨ ENDPOINT: Contar personal disponible por grupos
+     * Ruta: /API/asignaciones/contar-personal
+     */
+    public static function contarPersonalAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $json = file_get_contents('php://input');
+            $data = json_decode($json, true);
+
+            $grupos = $data['grupos'] ?? [];
+
+            error_log("📦 Grupos recibidos: " . json_encode($grupos));
+
+            if (!is_array($grupos)) {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'Formato de grupos inválido'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            if (empty($grupos)) {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'No se proporcionaron grupos'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            // Convertir a placeholders para SQL
+            $placeholders = [];
+            $params = [];
+
+            foreach ($grupos as $index => $id_grupo) {
+                $key = ":grupo_{$index}";
+                $placeholders[] = $key;
+                $params[$key] = (int)$id_grupo;
+            }
+
+            $in_clause = implode(',', $placeholders);
+
+            // ✅ CAMBIO: Usar AsignacionServicio::fetchFirst() en lugar de self::fetchFirst()
+
+            // Contar Oficiales
+            $sql_oficiales = "SELECT COUNT(*) as total 
+                         FROM bhr_personal 
+                         WHERE tipo = 'OFICIAL' 
+                         AND activo = 1
+                         AND id_grupo_descanso IN ($in_clause)";
+
+            $oficiales = AsignacionServicio::fetchFirst($sql_oficiales, $params);
+
+            // Contar Especialistas
+            $sql_especialistas = "SELECT COUNT(*) as total 
+                             FROM bhr_personal 
+                             WHERE tipo = 'ESPECIALISTA' 
+                             AND activo = 1
+                             AND id_grupo_descanso IN ($in_clause)";
+
+            $especialistas = AsignacionServicio::fetchFirst($sql_especialistas, $params);
+
+            // Contar Tropa
+            $sql_tropa = "SELECT COUNT(*) as total 
+                     FROM bhr_personal 
+                     WHERE tipo = 'TROPA' 
+                     AND activo = 1
+                     AND id_grupo_descanso IN ($in_clause)";
+
+            $tropa = AsignacionServicio::fetchFirst($sql_tropa, $params);
+
+            $total = ($oficiales['total'] ?? 0) + ($especialistas['total'] ?? 0) + ($tropa['total'] ?? 0);
+
+            error_log("✅ Total personal disponible: " . $total);
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Conteo realizado',
+                'oficiales' => (int)($oficiales['total'] ?? 0),
+                'especialistas' => (int)($especialistas['total'] ?? 0),
+                'tropa' => (int)($tropa['total'] ?? 0),
+                'total' => $total
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en contarPersonalAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al contar personal',
+                'detalle' => $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
     /**
      * Obtiene las asignaciones de una semana específica
      */
