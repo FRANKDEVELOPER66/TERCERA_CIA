@@ -4,7 +4,7 @@ namespace Model;
 
 class AsignacionServicio extends ActiveRecord
 {
-    // ✨ NUEVA VARIABLE ESTÁTICA: Para almacenar grupos disponibles
+    // ✨ VARIABLE ESTÁTICA: Para almacenar grupos disponibles
     private static $grupos_disponibles_actuales = [];
 
     protected static $tabla = 'asignaciones_servicio';
@@ -47,9 +47,28 @@ class AsignacionServicio extends ActiveRecord
     }
 
     /**
-     * ✨ MODIFICADO: Ahora recibe grupos disponibles
-     * Genera asignaciones para una semana completa (Lunes a Domingo)
+     * ✅ FUNCIÓN AUXILIAR: Construir filtro de grupos
      */
+    private static function construirFiltroGrupos(&$params)
+    {
+        $filtro = '';
+
+        if (!empty(self::$grupos_disponibles_actuales)) {
+            $placeholders = [];
+            foreach (self::$grupos_disponibles_actuales as $index => $id_grupo) {
+                $key = ":grupo_disp_{$index}";
+                $placeholders[] = $key;
+                $params[$key] = (int)$id_grupo;
+            }
+            $filtro = "AND p.id_grupo_descanso IN (" . implode(',', $placeholders) . ")";
+            error_log("🔍 Filtro de grupos aplicado: " . $filtro);
+        } else {
+            error_log("⚠️ Sin filtro de grupos - se usará todo el personal activo");
+        }
+
+        return $filtro;
+    }
+
     public static function generarAsignacionesSemanal($fecha_inicio, $usuario_id = null, $grupos_disponibles = [])
     {
         $resultado = [
@@ -68,19 +87,18 @@ class AsignacionServicio extends ActiveRecord
                 return $resultado;
             }
 
-            // ✨ NUEVO: Guardar grupos disponibles para uso global en la clase
+            // ✨ GUARDAR grupos disponibles globalmente
             self::$grupos_disponibles_actuales = $grupos_disponibles;
-
             error_log("🎯 Grupos disponibles para esta semana: " . json_encode($grupos_disponibles));
 
             $fecha_domingo = date('Y-m-d', strtotime($fecha_inicio . ' +6 days'));
 
-            // 1️⃣ Obtener personal que será afectado (ANTES de borrar)
+            // 1️⃣ Obtener personal afectado
             error_log("📋 Obteniendo personal afectado por regeneración...");
             $personal_a_recalcular = self::fetchArray(
                 "SELECT DISTINCT id_personal 
-             FROM asignaciones_servicio 
-             WHERE fecha_servicio BETWEEN :inicio AND :fin",
+                 FROM asignaciones_servicio 
+                 WHERE fecha_servicio BETWEEN :inicio AND :fin",
                 [':inicio' => $fecha_inicio, ':fin' => $fecha_domingo]
             );
 
@@ -90,20 +108,20 @@ class AsignacionServicio extends ActiveRecord
             error_log("🗑️ Limpiando asignaciones de {$fecha_inicio} a {$fecha_domingo}");
             $eliminadas = self::ejecutarQuery(
                 "DELETE FROM asignaciones_servicio 
-             WHERE fecha_servicio BETWEEN :inicio AND :fin",
+                 WHERE fecha_servicio BETWEEN :inicio AND :fin",
                 [':inicio' => $fecha_inicio, ':fin' => $fecha_domingo]
             );
 
             error_log("✅ Asignaciones eliminadas: " . ($eliminadas['resultado'] ?? 0));
 
-            // 3️⃣ Recalcular historial del personal afectado
+            // 3️⃣ Recalcular historial
             error_log("🔄 Recalculando historial para personal afectado...");
             foreach ($personal_a_recalcular as $persona) {
                 self::recalcularHistorialPersona($persona['id_personal']);
             }
             error_log("✅ Historial recalculado");
 
-            // 4️⃣ Actualizar días desde último servicio para TODOS
+            // 4️⃣ Actualizar días desde último servicio
             self::actualizarDiasDesdeUltimo();
             error_log("✅ Días desde último servicio actualizados globalmente");
 
@@ -134,7 +152,7 @@ class AsignacionServicio extends ActiveRecord
 
                     self::ejecutarQuery(
                         "DELETE FROM asignaciones_servicio 
-                     WHERE fecha_servicio BETWEEN :inicio AND :fecha_actual",
+                         WHERE fecha_servicio BETWEEN :inicio AND :fecha_actual",
                         [':inicio' => $fecha_inicio, ':fecha_actual' => $fecha_str]
                     );
 
@@ -158,7 +176,7 @@ class AsignacionServicio extends ActiveRecord
                 }
             }
 
-            // 6️⃣ Si todo salió bien
+            // 6️⃣ Éxito
             $resultado['exito'] = true;
             $resultado['mensaje'] = 'Asignaciones generadas exitosamente para toda la semana';
             $resultado['asignaciones'] = $asignaciones_creadas;
@@ -178,9 +196,6 @@ class AsignacionServicio extends ActiveRecord
         }
     }
 
-    /**
-     * Genera todos los servicios para un día específico
-     */
     private static function generarServiciosPorDia($fecha, $usuario_id = null)
     {
         $asignaciones = [];
@@ -206,7 +221,7 @@ class AsignacionServicio extends ActiveRecord
                 throw new \Exception("No hay especialistas disponibles para TÁCTICO en {$fecha}");
             }
 
-            // 2.5 TÁCTICO TROPA (sargentos)
+            // 2.5 TÁCTICO TROPA
             $tactico_tropa = self::asignarTacticoTropa($fecha, $usuario_id, $id_oficial);
             if ($tactico_tropa && !is_array($tactico_tropa)) {
                 $asignaciones[] = $tactico_tropa;
@@ -216,9 +231,7 @@ class AsignacionServicio extends ActiveRecord
             }
 
             // 3. RECONOCIMIENTO
-            error_log("⏳ Iniciando asignación de RECONOCIMIENTO...");
             $reconocimiento = self::asignarReconocimiento($fecha, $usuario_id, $id_oficial);
-
             foreach ($reconocimiento as $rec) {
                 $asignaciones[] = $rec;
             }
@@ -271,193 +284,36 @@ class AsignacionServicio extends ActiveRecord
         }
     }
 
+    // ========================================
+    // ✅ FUNCIONES DE ASIGNACIÓN CORREGIDAS
+    // ========================================
+
     /**
-     * ✨ FUNCIÓN CLAVE: Obtiene personal disponible CON FILTRO DE GRUPOS
-     * @param array $excluir_ids IDs de personal ya seleccionado en este proceso (en memoria)
+     * ✅ CORREGIDO: Ahora usa filtro de grupos
      */
-    private static function obtenerPersonalDisponible($fecha, $tipo, $cantidad, $nombre_servicio, $fecha_exclusion = null, $incluir_grados = null, $modo_emergencia = false, $excluir_ids = [])
+    private static function obtenerOficialDisponible($fecha)
     {
-        error_log("📋 Buscando personal: tipo={$tipo}, servicio={$nombre_servicio}, cantidad={$cantidad}");
+        $params = [':fecha' => $fecha];
+        $filtro_grupos = self::construirFiltroGrupos($params);
 
-        $fecha_obj = new \DateTime($fecha);
-        $dia_semana = $fecha_obj->format('N');
-        $dias_desde_lunes = $dia_semana - 1;
-        $fecha_lunes = clone $fecha_obj;
-        $fecha_lunes->modify("-{$dias_desde_lunes} days");
-        $lunes_str = $fecha_lunes->format('Y-m-d');
-        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
+        $sql = "SELECT p.id_personal, g.nombre as grado, g.orden
+            FROM bhr_personal p
+            INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+            LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+                AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+            WHERE p.tipo = 'OFICIAL'
+                AND p.activo = 1
+                AND cd.id_calendario IS NULL
+                {$filtro_grupos}
+            ORDER BY g.orden ASC
+            LIMIT 1";
 
-        // ✨ NUEVO: Construir filtro de grupos disponibles
-        $filtro_grupos = '';
-        $params_grupos = [];
-
-        if (!empty(self::$grupos_disponibles_actuales)) {
-            $placeholders_grupos = [];
-            foreach (self::$grupos_disponibles_actuales as $index => $id_grupo) {
-                $key = ":grupo_disp_{$index}";
-                $placeholders_grupos[] = $key;
-                $params_grupos[$key] = (int)$id_grupo;
-            }
-            $filtro_grupos = "AND p.id_grupo_descanso IN (" . implode(',', $placeholders_grupos) . ")";
-
-            error_log("🔍 Filtro de grupos aplicado: " . $filtro_grupos);
-            error_log("🔍 Grupos permitidos: " . json_encode(self::$grupos_disponibles_actuales));
-        } else {
-            error_log("⚠️ Sin filtro de grupos - se usará todo el personal activo");
-        }
-
-        // Construir filtro de grados
-        $filtro_grados = '';
-        $params_grados = [];
-        if ($incluir_grados !== null && is_array($incluir_grados) && count($incluir_grados) > 0) {
-            $placeholders = [];
-            foreach ($incluir_grados as $index => $id_grado) {
-                $key = ":grado_{$index}";
-                $placeholders[] = $key;
-                $params_grados[$key] = $id_grado;
-            }
-            $filtro_grados = "AND p.id_grado IN (" . implode(',', $placeholders) . ")";
-        }
-
-        // Filtro para excluir IDs en memoria
-        $filtro_excluir_ids = '';
-        $params_excluir = [];
-        if (!empty($excluir_ids)) {
-            $placeholders_excluir = [];
-            foreach ($excluir_ids as $index => $id) {
-                $key = ":excluir_{$index}";
-                $placeholders_excluir[] = $key;
-                $params_excluir[$key] = $id;
-            }
-            $filtro_excluir_ids = "AND p.id_personal NOT IN (" . implode(',', $placeholders_excluir) . ")";
-        }
-
-        $exclusion_sql = '';
-        if ($fecha_exclusion && !$modo_emergencia) {
-            $exclusion_sql = "AND p.id_personal NOT IN (
-            SELECT a2.id_personal FROM asignaciones_servicio a2
-            INNER JOIN tipos_servicio ts2 ON a2.id_tipo_servicio = ts2.id_tipo_servicio
-            WHERE a2.fecha_servicio = :fecha_exclusion
-            AND ts2.nombre = 'SERVICIO NOCTURNO'
-        )";
-        }
-
-        $sql = "SELECT p.id_personal,
-            p.nombres,
-            p.apellidos,
-            g.nombre as grado,
-            
-            (SELECT COUNT(*) 
-             FROM asignaciones_servicio a_count 
-             WHERE a_count.id_personal = p.id_personal 
-             AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
-            ) as servicios_semana_total,
-            
-            (SELECT COUNT(*) 
-             FROM asignaciones_servicio a_count2
-             INNER JOIN tipos_servicio ts_count ON a_count2.id_tipo_servicio = ts_count.id_tipo_servicio
-             WHERE a_count2.id_personal = p.id_personal 
-             AND a_count2.fecha_servicio BETWEEN :fecha_lunes_count2 AND :fecha_domingo_count2
-             AND ts_count.nombre = :servicio3
-            ) as veces_este_servicio,
-            
-            COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
-            COALESCE(hr.prioridad, 0) as prioridad_hist
-            
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = :servicio)
-        LEFT JOIN exclusiones_servicio ex ON p.id_personal = ex.id_personal
-            AND ex.fecha_exclusion = :fecha2
-            AND ex.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = :servicio2)
-        WHERE p.tipo = :tipo
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            AND ex.id_exclusion IS NULL
-            {$filtro_grupos}       
-            {$filtro_grados}
-            {$filtro_excluir_ids}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-            {$exclusion_sql}
-        ORDER BY 
-            servicios_semana_total ASC,
-            veces_este_servicio ASC,
-            dias_ultimo DESC,
-            prioridad_hist ASC,
-            g.orden ASC,
-            RAND()
-        LIMIT :cantidad";
-
-        $params = [
-            ':fecha' => $fecha,
-            ':fecha2' => $fecha,
-            ':tipo' => $tipo,
-            ':servicio' => $nombre_servicio,
-            ':servicio2' => $nombre_servicio,
-            ':servicio3' => $nombre_servicio,
-            ':cantidad' => (int)$cantidad,
-            ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo,
-            ':fecha_lunes_count' => $lunes_str,
-            ':fecha_domingo_count' => $fecha_domingo,
-            ':fecha_lunes_count2' => $lunes_str,
-            ':fecha_domingo_count2' => $fecha_domingo
-        ];
-
-        // ✨ IMPORTANTE: Merge de TODOS los parámetros
-        $params = array_merge($params, $params_grupos, $params_grados, $params_excluir);
-
-        if ($fecha_exclusion) {
-            $params[':fecha_exclusion'] = $fecha_exclusion;
-        }
-
-        if ($modo_emergencia) {
-            error_log("🚨 MODO EMERGENCIA ACTIVADO para {$nombre_servicio}");
-        }
-
-        if (!empty($excluir_ids)) {
-            error_log("🚫 Excluyendo IDs en memoria: " . implode(', ', $excluir_ids));
-        }
-
-        $personal = self::fetchArray($sql, $params);
-
-        if (empty($personal)) {
-            error_log("❌ No se encontró personal disponible para {$nombre_servicio}");
-
-            if (!$modo_emergencia) {
-                error_log("🚨 Intentando modo emergencia...");
-                return self::obtenerPersonalDisponible(
-                    $fecha,
-                    $tipo,
-                    $cantidad,
-                    $nombre_servicio,
-                    $fecha_exclusion,
-                    $incluir_grados,
-                    true,
-                    $excluir_ids
-                );
-            }
-
-            throw new \Exception("No hay suficiente personal disponible para {$nombre_servicio}");
-        }
-
-        error_log("✅ Personal encontrado: " . count($personal) . " de {$cantidad} solicitados");
-
-        return $personal;
+        return self::fetchFirst($sql, $params);
     }
 
-    // ========================================
-    // RESTO DE FUNCIONES DE ASIGNACIÓN
-    // (No necesitan modificación, ya usan obtenerPersonalDisponible)
-    // ========================================
-
+    /**
+     * ✅ CORREGIDO: SEMANA con filtro de grupos
+     */
     private static function asignarSemana($fecha, $usuario_id, $id_oficial = null)
     {
         $fecha_obj = new \DateTime($fecha);
@@ -466,6 +322,15 @@ class AsignacionServicio extends ActiveRecord
         if ($dia_semana != 1) {
             return null;
         }
+
+        $fecha_fin = date('Y-m-d', strtotime($fecha . ' +6 days'));
+        $params = [
+            ':fecha' => $fecha,
+            ':fecha_inicio' => $fecha,
+            ':fecha_fin' => $fecha_fin
+        ];
+
+        $filtro_grupos = self::construirFiltroGrupos($params);
 
         $sql = "SELECT p.id_personal
         FROM bhr_personal p
@@ -478,6 +343,7 @@ class AsignacionServicio extends ActiveRecord
             AND g.nombre = 'Sargento 1ro.'
             AND p.activo = 1
             AND cd.id_calendario IS NULL
+            {$filtro_grupos}
             AND p.id_personal NOT IN (
                 SELECT id_personal FROM asignaciones_servicio 
                 WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
@@ -487,13 +353,6 @@ class AsignacionServicio extends ActiveRecord
             COALESCE(hr.dias_desde_ultimo, 999) DESC,
             RAND()
         LIMIT 1";
-
-        $fecha_fin = date('Y-m-d', strtotime($fecha . ' +6 days'));
-        $params = [
-            ':fecha' => $fecha,
-            ':fecha_inicio' => $fecha,
-            ':fecha_fin' => $fecha_fin
-        ];
 
         $resultado = self::fetchFirst($sql, $params);
 
@@ -512,6 +371,9 @@ class AsignacionServicio extends ActiveRecord
         return null;
     }
 
+    /**
+     * ✅ CORREGIDO: TÁCTICO con filtro de grupos
+     */
     private static function asignarTactico($fecha, $usuario_id, $id_oficial = null)
     {
         $fecha_obj = new \DateTime($fecha);
@@ -522,38 +384,6 @@ class AsignacionServicio extends ActiveRecord
         $lunes_str = $fecha_lunes->format('Y-m-d');
         $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
 
-        $sql = "SELECT p.id_personal,
-            (SELECT COUNT(*) 
-             FROM asignaciones_servicio a_count 
-             INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
-             WHERE a_count.id_personal = p.id_personal 
-             AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
-             AND ts_count.nombre = 'TACTICO'
-            ) as veces_tactico
-    FROM bhr_personal p
-    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TACTICO')
-    WHERE p.tipo = 'ESPECIALISTA'
-        AND p.activo = 1
-        AND cd.id_calendario IS NULL
-        AND p.id_personal NOT IN (
-            SELECT id_personal FROM asignaciones_servicio 
-            WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
-            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-        )
-        AND p.id_personal NOT IN (
-    SELECT id_personal FROM asignaciones_servicio 
-    WHERE fecha_servicio = :fecha_cuartelero
-    AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-)
-    ORDER BY 
-        veces_tactico ASC,
-        COALESCE(hr.dias_desde_ultimo, 999) DESC,
-        RAND()
-    LIMIT 1";
-
         $params = [
             ':fecha' => $fecha,
             ':fecha_lunes' => $lunes_str,
@@ -562,6 +392,41 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_domingo_count' => $fecha_domingo,
             ':fecha_cuartelero' => $fecha
         ];
+
+        $filtro_grupos = self::construirFiltroGrupos($params);
+
+        $sql = "SELECT p.id_personal,
+            (SELECT COUNT(*) 
+             FROM asignaciones_servicio a_count 
+             INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
+             WHERE a_count.id_personal = p.id_personal 
+             AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
+             AND ts_count.nombre = 'TACTICO'
+            ) as veces_tactico
+        FROM bhr_personal p
+        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TACTICO')
+        WHERE p.tipo = 'ESPECIALISTA'
+            AND p.activo = 1
+            AND cd.id_calendario IS NULL
+            {$filtro_grupos}
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio = :fecha_cuartelero
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+            )
+        ORDER BY 
+            veces_tactico ASC,
+            COALESCE(hr.dias_desde_ultimo, 999) DESC,
+            RAND()
+        LIMIT 1";
 
         $resultado = self::fetchFirst($sql, $params);
 
@@ -580,6 +445,9 @@ class AsignacionServicio extends ActiveRecord
         return null;
     }
 
+    /**
+     * ✅ CORREGIDO: TÁCTICO TROPA con filtro de grupos
+     */
     private static function asignarTacticoTropa($fecha, $usuario_id, $id_oficial = null)
     {
         $fecha_obj = new \DateTime($fecha);
@@ -590,40 +458,6 @@ class AsignacionServicio extends ActiveRecord
         $lunes_str = $fecha_lunes->format('Y-m-d');
         $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
 
-        $sql = "SELECT p.id_personal,
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_count 
-         INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
-         WHERE a_count.id_personal = p.id_personal 
-         AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
-         AND ts_count.nombre = 'TACTICO TROPA'
-        ) as veces_tactico_tropa
-    FROM bhr_personal p
-    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TACTICO TROPA')
-    WHERE p.tipo = 'TROPA'
-        AND g.nombre LIKE 'Sargento%'
-        AND p.activo = 1
-        AND cd.id_calendario IS NULL
-        AND p.id_personal NOT IN (
-            SELECT id_personal FROM asignaciones_servicio 
-            WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
-            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-        )
-        AND p.id_personal NOT IN (
-            SELECT id_personal FROM asignaciones_servicio 
-            WHERE fecha_servicio = :fecha_cuartelero
-            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-        )
-    ORDER BY 
-        veces_tactico_tropa ASC,
-        COALESCE(hr.dias_desde_ultimo, 999) DESC,
-        RAND()
-    LIMIT 1";
-
         $params = [
             ':fecha' => $fecha,
             ':fecha_lunes' => $lunes_str,
@@ -632,6 +466,43 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_domingo_count' => $fecha_domingo,
             ':fecha_cuartelero' => $fecha
         ];
+
+        $filtro_grupos = self::construirFiltroGrupos($params);
+
+        $sql = "SELECT p.id_personal,
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_count 
+         INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
+         WHERE a_count.id_personal = p.id_personal 
+         AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
+         AND ts_count.nombre = 'TACTICO TROPA'
+        ) as veces_tactico_tropa
+        FROM bhr_personal p
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TACTICO TROPA')
+        WHERE p.tipo = 'TROPA'
+            AND g.nombre LIKE 'Sargento%'
+            AND p.activo = 1
+            AND cd.id_calendario IS NULL
+            {$filtro_grupos}
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio = :fecha_cuartelero
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+            )
+        ORDER BY 
+            veces_tactico_tropa ASC,
+            COALESCE(hr.dias_desde_ultimo, 999) DESC,
+            RAND()
+        LIMIT 1";
 
         $resultado = self::fetchFirst($sql, $params);
 
@@ -650,168 +521,179 @@ class AsignacionServicio extends ActiveRecord
         return null;
     }
 
-    private static function asignarReconocimiento($fecha, $usuario_id, $id_oficial = null)
+    /**
+     * ✅ CORREGIDO: BANDERÍN con filtro de grupos
+     */
+    private static function asignarBanderin($fecha, $usuario_id, $id_oficial = null)
     {
-        $asignaciones = [];
-        $logs = [];
-        $ids_ya_asignados = [];
+        $fecha_obj = new \DateTime($fecha);
+        $dia_semana = $fecha_obj->format('N');
+        $dias_desde_lunes = $dia_semana - 1;
+        $fecha_lunes = clone $fecha_obj;
+        $fecha_lunes->modify("-{$dias_desde_lunes} days");
+        $lunes_str = $fecha_lunes->format('Y-m-d');
+        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
 
-        $logs[] = "🔍 === ASIGNANDO RECONOCIMIENTO para {$fecha} ===";
+        $params = [
+            ':fecha' => $fecha,
+            ':fecha2' => $fecha,
+            ':fecha3' => $fecha,
+            ':fecha_lunes' => $lunes_str,
+            ':fecha_domingo' => $fecha_domingo,
+            ':fecha_cuartelero' => $fecha
+        ];
 
-        // ESPECIALISTAS
-        $especialistas = self::obtenerPersonalDisponible($fecha, 'ESPECIALISTA', 2, 'RECONOCIMIENTO', null, null, false, $ids_ya_asignados);
+        $filtro_grupos = self::construirFiltroGrupos($params);
 
-        $logs[] = "👷 INTENTO 1 - Especialistas encontrados: " . count($especialistas) . "/2 (modo normal)";
+        $sql = "SELECT p.id_personal
+        FROM bhr_personal p
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
+        WHERE p.tipo = 'TROPA'
+            AND g.nombre LIKE 'Sargento%'
+            AND p.activo = 1
+            AND cd.id_calendario IS NULL
+            {$filtro_grupos}
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio = :fecha_cuartelero
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+            )
+        ORDER BY 
+            COALESCE(hr.dias_desde_ultimo, 999) DESC,
+            g.orden ASC,
+            RAND()
+        LIMIT 1";
 
-        if (count($especialistas) < 2) {
-            $logs[] = "⚠️ No hay suficientes especialistas, activando modo EMERGENCIA";
+        $resultado = self::fetchFirst($sql, $params);
 
-            $especialistas = self::obtenerPersonalDisponible($fecha, 'ESPECIALISTA', 2, 'RECONOCIMIENTO', null, null, true, $ids_ya_asignados);
-
-            $logs[] = "👷 INTENTO 2 - Especialistas encontrados: " . count($especialistas) . "/2 (modo emergencia)";
-        }
-
-        $especialistas_encontrados = count($especialistas);
-
-        if ($especialistas_encontrados < 2) {
-            $logs[] = "⚠️ Solo hay {$especialistas_encontrados} especialistas, completando con SARGENTOS";
-
-            $sargentos_necesarios = 2 - $especialistas_encontrados;
-
-            $filtro_excluir = '';
-            $params_excluir = [];
-            if (!empty($ids_ya_asignados)) {
-                $placeholders = [];
-                foreach ($ids_ya_asignados as $idx => $id) {
-                    $key = ":excluir_{$idx}";
-                    $placeholders[] = $key;
-                    $params_excluir[$key] = $id;
-                }
-                $filtro_excluir = "AND p.id_personal NOT IN (" . implode(',', $placeholders) . ")";
-            }
-
-            $sargentos = self::fetchArray(
-                "SELECT p.id_personal, p.nombres, p.apellidos
-             FROM bhr_personal p
-             INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-             LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-                AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-             WHERE p.tipo = 'TROPA'
-                AND g.nombre LIKE 'Sargento%'
-                AND p.activo = 1
-                AND cd.id_calendario IS NULL
-                {$filtro_excluir}
-                AND p.id_personal NOT IN (
-                    SELECT id_personal FROM asignaciones_servicio 
-                    WHERE fecha_servicio = :fecha2
-                )
-                AND p.id_personal NOT IN (
-    SELECT id_personal FROM asignaciones_servicio 
-    WHERE fecha_servicio = :fecha_cuartelero
-    AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-)
-             ORDER BY g.orden ASC, RAND()
-             LIMIT :cantidad",
-                array_merge([
-                    ':fecha' => $fecha,
-                    ':fecha2' => $fecha,
-                    ':cantidad' => $sargentos_necesarios,
-                    ':fecha_cuartelero' => $fecha
-                ], $params_excluir)
-            );
-
-            $logs[] = "👷 INTENTO 3 - Sargentos de reemplazo: " . count($sargentos) . "/{$sargentos_necesarios}";
-
-            foreach ($sargentos as $sarg) {
-                $especialistas[] = $sarg;
-                $logs[] = "  → Sargento reemplazo: {$sarg['nombres']} {$sarg['apellidos']} (ID: {$sarg['id_personal']})";
-            }
-        }
-
-        // ASIGNAR ESPECIALISTAS
-        $logs[] = "📝 Asignando " . count($especialistas) . " especialistas...";
-
-        foreach ($especialistas as $esp) {
-            $nombre = ($esp['nombres'] ?? '') . ' ' . ($esp['apellidos'] ?? '');
-
-            $asignacion = self::crearAsignacion(
-                $esp['id_personal'],
-                'RECONOCIMIENTO',
+        if ($resultado) {
+            return self::crearAsignacion(
+                $resultado['id_personal'],
+                'BANDERÍN',
                 $fecha,
                 '06:00:00',
-                '18:00:00',
+                '20:00:00',
                 $usuario_id,
                 $id_oficial
             );
-
-            if (is_array($asignacion) && isset($asignacion['error'])) {
-                $logs[] = "❌ ERROR al asignar especialista {$nombre} (ID: {$esp['id_personal']}): " . ($asignacion['mensaje'] ?? 'Error desconocido');
-            } elseif ($asignacion && !is_array($asignacion)) {
-                $asignaciones[] = $asignacion;
-                $ids_ya_asignados[] = $esp['id_personal'];
-                $logs[] = "✅ Especialista asignado: {$nombre} (ID: {$esp['id_personal']})";
-            } else {
-                $logs[] = "⚠️ Asignación NULL para especialista {$nombre} (ID: {$esp['id_personal']})";
-            }
         }
 
-        // SOLDADOS
-        $fecha_anterior = date('Y-m-d', strtotime($fecha . ' -1 day'));
-
-        $soldados = self::obtenerPersonalDisponible($fecha, 'TROPA', 4, 'RECONOCIMIENTO', $fecha_anterior, null, false, $ids_ya_asignados);
-
-        $logs[] = "🎖️ INTENTO 1 - Soldados encontrados: " . count($soldados) . "/4 (modo normal)";
-
-        if (count($soldados) < 4) {
-            $logs[] = "⚠️ Faltan soldados, INCLUYENDO quienes hicieron nocturno ayer";
-
-            $soldados = self::obtenerPersonalDisponible($fecha, 'TROPA', 4, 'RECONOCIMIENTO', null, null, true, $ids_ya_asignados);
-
-            $logs[] = "🎖️ INTENTO 2 - Soldados encontrados: " . count($soldados) . "/4 (modo emergencia)";
-        }
-
-        $logs[] = "📝 Asignando " . count($soldados) . " soldados...";
-
-        foreach ($soldados as $sold) {
-            $nombre = ($sold['nombres'] ?? '') . ' ' . ($sold['apellidos'] ?? '');
-
-            $asignacion = self::crearAsignacion(
-                $sold['id_personal'],
-                'RECONOCIMIENTO',
-                $fecha,
-                '06:00:00',
-                '18:00:00',
-                $usuario_id,
-                $id_oficial
-            );
-
-            if (is_array($asignacion) && isset($asignacion['error'])) {
-                $logs[] = "❌ ERROR al asignar soldado {$nombre} (ID: {$sold['id_personal']}): " . ($asignacion['mensaje'] ?? 'Error desconocido');
-            } elseif ($asignacion && !is_array($asignacion)) {
-                $asignaciones[] = $asignacion;
-                $ids_ya_asignados[] = $sold['id_personal'];
-                $logs[] = "✅ Soldado asignado: {$nombre} (ID: {$sold['id_personal']})";
-            } else {
-                $logs[] = "⚠️ Asignación NULL para soldado {$nombre} (ID: {$sold['id_personal']})";
-            }
-        }
-
-        $total = count($asignaciones);
-        $logs[] = "📊 RECONOCIMIENTO RESULTADO FINAL: {$total}/6 personas creadas en BD";
-
-        foreach ($logs as $log) {
-            error_log($log);
-        }
-
-        if ($total < 6) {
-            $mensaje_error = "No hay suficiente personal para RECONOCIMIENTO en {$fecha}. Se necesitan 6, se encontraron {$total}";
-
-            throw new \Exception($mensaje_error . "\n" . implode("\n", $logs));
-        }
-
-        return $asignaciones;
+        return null;
     }
 
+    /**
+     * ✅ CORREGIDO: CUARTELERO con filtro de grupos
+     */
+    private static function asignarCuartelero($fecha, $usuario_id, $id_oficial = null)
+    {
+        $fecha_obj = new \DateTime($fecha);
+        $dia_semana = $fecha_obj->format('N');
+        $dias_desde_lunes = $dia_semana - 1;
+        $fecha_lunes = clone $fecha_obj;
+        $fecha_lunes->modify("-{$dias_desde_lunes} days");
+        $lunes_str = $fecha_lunes->format('Y-m-d');
+        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
+
+        $params = [
+            ':fecha' => $fecha,
+            ':fecha2' => $fecha,
+            ':fecha3' => $fecha,
+            ':fecha_check' => $fecha,
+            ':fecha_lunes' => $lunes_str,
+            ':fecha_domingo' => $fecha_domingo,
+            ':fecha_lunes_count' => $lunes_str,
+            ':fecha_domingo_count' => $fecha_domingo
+        ];
+
+        $filtro_grupos = self::construirFiltroGrupos($params);
+
+        $sql = "SELECT p.id_personal,
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_cua
+         INNER JOIN tipos_servicio ts_cua ON a_cua.id_tipo_servicio = ts_cua.id_tipo_servicio
+         WHERE a_cua.id_personal = p.id_personal 
+         AND a_cua.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
+         AND ts_cua.nombre = 'CUARTELERO'
+        ) as veces_cuartelero_semana,
+        
+        COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
+        
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_dia
+         WHERE a_dia.id_personal = p.id_personal 
+         AND a_dia.fecha_servicio = :fecha_check
+        ) as servicios_ese_dia
+        
+        FROM bhr_personal p
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+        WHERE p.tipo = 'TROPA'
+            AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
+            AND p.activo = 1
+            AND cd.id_calendario IS NULL
+            {$filtro_grupos}
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+            )
+        ORDER BY 
+            servicios_ese_dia ASC,
+            veces_cuartelero_semana ASC,
+            dias_ultimo DESC,
+            g.orden ASC,
+            RAND()
+        LIMIT 1";
+
+        $resultado = self::fetchFirst($sql, $params);
+
+        if ($resultado) {
+            if ($resultado['servicios_ese_dia'] == 0) {
+                error_log("✅ CUARTELERO seleccionado SIN otros servicios: ID {$resultado['id_personal']}");
+            } else {
+                error_log("⚠️ CUARTELERO seleccionado CON {$resultado['servicios_ese_dia']} servicios ese día: ID {$resultado['id_personal']}");
+            }
+
+            return self::crearAsignacion(
+                $resultado['id_personal'],
+                'CUARTELERO',
+                $fecha,
+                '08:00:00',
+                '07:45:00',
+                $usuario_id,
+                $id_oficial
+            );
+        }
+
+        error_log("⚠️ NO se encontró CUARTELERO disponible para {$fecha}");
+        return null;
+    }
+
+    /**
+     * ✅ CORREGIDO: SERVICIO NOCTURNO con filtro de grupos
+     */
     private static function asignarServicioNocturno($fecha, $usuario_id, $id_oficial = null)
     {
         $asignaciones = [];
@@ -825,6 +707,21 @@ class AsignacionServicio extends ActiveRecord
         $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
 
         error_log("🌙 === ASIGNANDO SERVICIO NOCTURNO ===");
+
+        $params = [
+            ':fecha' => $fecha,
+            ':fecha_actual' => $fecha,
+            ':fecha_hoy' => $fecha,
+            ':fecha_lunes' => $lunes_str,
+            ':fecha_domingo' => $fecha_domingo,
+            ':fecha_lunes_count' => $lunes_str,
+            ':fecha_domingo_count' => $fecha_domingo,
+            ':fecha_lunes_count2' => $lunes_str,
+            ':fecha_domingo_count2' => $fecha_domingo,
+            ':fecha_cuartelero' => $fecha
+        ];
+
+        $filtro_grupos = self::construirFiltroGrupos($params);
 
         $sql = "SELECT 
         p.id_personal,
@@ -860,44 +757,32 @@ class AsignacionServicio extends ActiveRecord
          AND a_hoy.fecha_servicio = :fecha_hoy
         ) as servicios_hoy
         
-    FROM bhr_personal p
-    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-    WHERE p.tipo = 'TROPA'
-        AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
-        AND p.activo = 1
-        AND cd.id_calendario IS NULL
-        AND p.id_personal NOT IN (
-            SELECT id_personal FROM asignaciones_servicio 
-            WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
-            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-        )
-        AND p.id_personal NOT IN (
-            SELECT id_personal FROM asignaciones_servicio 
-            WHERE fecha_servicio = :fecha_cuartelero
-            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-        )
-    ORDER BY 
-        nocturnos_semana ASC,
-        COALESCE(dias_ultimo_nocturno, 999) DESC,
-        servicios_semana_total ASC,
-        g.orden ASC,
-        RAND()
-    LIMIT 3";
-
-        $params = [
-            ':fecha' => $fecha,
-            ':fecha_actual' => $fecha,
-            ':fecha_hoy' => $fecha,
-            ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo,
-            ':fecha_lunes_count' => $lunes_str,
-            ':fecha_domingo_count' => $fecha_domingo,
-            ':fecha_lunes_count2' => $lunes_str,
-            ':fecha_domingo_count2' => $fecha_domingo,
-            ':fecha_cuartelero' => $fecha
-        ];
+        FROM bhr_personal p
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+        WHERE p.tipo = 'TROPA'
+            AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
+            AND p.activo = 1
+            AND cd.id_calendario IS NULL
+            {$filtro_grupos}
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio = :fecha_cuartelero
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+            )
+        ORDER BY 
+            nocturnos_semana ASC,
+            COALESCE(dias_ultimo_nocturno, 999) DESC,
+            servicios_semana_total ASC,
+            g.orden ASC,
+            RAND()
+        LIMIT 3";
 
         $soldados = self::fetchArray($sql, $params);
 
@@ -941,76 +826,176 @@ class AsignacionServicio extends ActiveRecord
         return $asignaciones;
     }
 
-    private static function asignarBanderin($fecha, $usuario_id, $id_oficial = null)
+    /**
+     * ✅ RECONOCIMIENTO ya usa obtenerPersonalDisponible() que ya tiene el filtro
+     */
+    private static function asignarReconocimiento($fecha, $usuario_id, $id_oficial = null)
     {
-        $fecha_obj = new \DateTime($fecha);
-        $dia_semana = $fecha_obj->format('N');
-        $dias_desde_lunes = $dia_semana - 1;
-        $fecha_lunes = clone $fecha_obj;
-        $fecha_lunes->modify("-{$dias_desde_lunes} days");
-        $lunes_str = $fecha_lunes->format('Y-m-d');
-        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
+        $asignaciones = [];
+        $logs = [];
+        $ids_ya_asignados = [];
 
-        $sql = "SELECT p.id_personal
-    FROM bhr_personal p
-    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
-    WHERE p.tipo = 'TROPA'
-        AND g.nombre LIKE 'Sargento%'
-        AND p.activo = 1
-        AND cd.id_calendario IS NULL
-        AND p.id_personal NOT IN (
-            SELECT id_personal FROM asignaciones_servicio 
-            WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
-            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
-        )
-        AND p.id_personal NOT IN (
-            SELECT id_personal FROM asignaciones_servicio 
-            WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
-            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-        )
-        AND p.id_personal NOT IN (
-    SELECT id_personal FROM asignaciones_servicio 
-    WHERE fecha_servicio = :fecha_cuartelero
-    AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-)   
-    ORDER BY 
-        COALESCE(hr.dias_desde_ultimo, 999) DESC,
-        g.orden ASC,
-        RAND()
-    LIMIT 1";
+        $logs[] = "🔍 === ASIGNANDO RECONOCIMIENTO para {$fecha} ===";
 
-        $params = [
-            ':fecha' => $fecha,
-            ':fecha2' => $fecha,
-            ':fecha3' => $fecha,
-            ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo,
-            ':fecha_cuartelero' => $fecha
-        ];
+        // ESPECIALISTAS
+        $especialistas = self::obtenerPersonalDisponible($fecha, 'ESPECIALISTA', 2, 'RECONOCIMIENTO', null, null, false, $ids_ya_asignados);
+        $logs[] = "👷 INTENTO 1 - Especialistas encontrados: " . count($especialistas) . "/2 (modo normal)";
 
-        $resultado = self::fetchFirst($sql, $params);
+        if (count($especialistas) < 2) {
+            $logs[] = "⚠️ No hay suficientes especialistas, activando modo EMERGENCIA";
+            $especialistas = self::obtenerPersonalDisponible($fecha, 'ESPECIALISTA', 2, 'RECONOCIMIENTO', null, null, true, $ids_ya_asignados);
+            $logs[] = "👷 INTENTO 2 - Especialistas encontrados: " . count($especialistas) . "/2 (modo emergencia)";
+        }
 
-        if ($resultado) {
-            return self::crearAsignacion(
-                $resultado['id_personal'],
-                'BANDERÍN',
+        $especialistas_encontrados = count($especialistas);
+
+        if ($especialistas_encontrados < 2) {
+            $logs[] = "⚠️ Solo hay {$especialistas_encontrados} especialistas, completando con SARGENTOS";
+            $sargentos_necesarios = 2 - $especialistas_encontrados;
+
+            $filtro_excluir = '';
+            $params_excluir = [];
+            if (!empty($ids_ya_asignados)) {
+                $placeholders = [];
+                foreach ($ids_ya_asignados as $idx => $id) {
+                    $key = ":excluir_{$idx}";
+                    $placeholders[] = $key;
+                    $params_excluir[$key] = $id;
+                }
+                $filtro_excluir = "AND p.id_personal NOT IN (" . implode(',', $placeholders) . ")";
+            }
+
+            $params_sargentos = array_merge([
+                ':fecha' => $fecha,
+                ':fecha2' => $fecha,
+                ':cantidad' => $sargentos_necesarios,
+                ':fecha_cuartelero' => $fecha
+            ], $params_excluir);
+
+            $filtro_grupos = self::construirFiltroGrupos($params_sargentos);
+
+            $sargentos = self::fetchArray(
+                "SELECT p.id_personal, p.nombres, p.apellidos
+                 FROM bhr_personal p
+                 INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+                 LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+                    AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+                 WHERE p.tipo = 'TROPA'
+                    AND g.nombre LIKE 'Sargento%'
+                    AND p.activo = 1
+                    AND cd.id_calendario IS NULL
+                    {$filtro_grupos}
+                    {$filtro_excluir}
+                    AND p.id_personal NOT IN (
+                        SELECT id_personal FROM asignaciones_servicio 
+                        WHERE fecha_servicio = :fecha2
+                    )
+                    AND p.id_personal NOT IN (
+                        SELECT id_personal FROM asignaciones_servicio 
+                        WHERE fecha_servicio = :fecha_cuartelero
+                        AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+                    )
+                 ORDER BY g.orden ASC, RAND()
+                 LIMIT :cantidad",
+                $params_sargentos
+            );
+
+            $logs[] = "👷 INTENTO 3 - Sargentos de reemplazo: " . count($sargentos) . "/{$sargentos_necesarios}";
+
+            foreach ($sargentos as $sarg) {
+                $especialistas[] = $sarg;
+                $logs[] = "  → Sargento reemplazo: {$sarg['nombres']} {$sarg['apellidos']} (ID: {$sarg['id_personal']})";
+            }
+        }
+
+        // ASIGNAR ESPECIALISTAS
+        $logs[] = "📝 Asignando " . count($especialistas) . " especialistas...";
+
+        foreach ($especialistas as $esp) {
+            $nombre = ($esp['nombres'] ?? '') . ' ' . ($esp['apellidos'] ?? '');
+
+            $asignacion = self::crearAsignacion(
+                $esp['id_personal'],
+                'RECONOCIMIENTO',
                 $fecha,
                 '06:00:00',
-                '20:00:00',
+                '18:00:00',
                 $usuario_id,
                 $id_oficial
             );
+
+            if (is_array($asignacion) && isset($asignacion['error'])) {
+                $logs[] = "❌ ERROR al asignar especialista {$nombre} (ID: {$esp['id_personal']}): " . ($asignacion['mensaje'] ?? 'Error desconocido');
+            } elseif ($asignacion && !is_array($asignacion)) {
+                $asignaciones[] = $asignacion;
+                $ids_ya_asignados[] = $esp['id_personal'];
+                $logs[] = "✅ Especialista asignado: {$nombre} (ID: {$esp['id_personal']})";
+            } else {
+                $logs[] = "⚠️ Asignación NULL para especialista {$nombre} (ID: {$esp['id_personal']})";
+            }
         }
 
-        return null;
+        // SOLDADOS
+        $fecha_anterior = date('Y-m-d', strtotime($fecha . ' -1 day'));
+
+        $soldados = self::obtenerPersonalDisponible($fecha, 'TROPA', 4, 'RECONOCIMIENTO', $fecha_anterior, null, false, $ids_ya_asignados);
+        $logs[] = "🎖️ INTENTO 1 - Soldados encontrados: " . count($soldados) . "/4 (modo normal)";
+
+        if (count($soldados) < 4) {
+            $logs[] = "⚠️ Faltan soldados, INCLUYENDO quienes hicieron nocturno ayer";
+            $soldados = self::obtenerPersonalDisponible($fecha, 'TROPA', 4, 'RECONOCIMIENTO', null, null, true, $ids_ya_asignados);
+            $logs[] = "🎖️ INTENTO 2 - Soldados encontrados: " . count($soldados) . "/4 (modo emergencia)";
+        }
+
+        $logs[] = "📝 Asignando " . count($soldados) . " soldados...";
+
+        foreach ($soldados as $sold) {
+            $nombre = ($sold['nombres'] ?? '') . ' ' . ($sold['apellidos'] ?? '');
+
+            $asignacion = self::crearAsignacion(
+                $sold['id_personal'],
+                'RECONOCIMIENTO',
+                $fecha,
+                '06:00:00',
+                '18:00:00',
+                $usuario_id,
+                $id_oficial
+            );
+
+            if (is_array($asignacion) && isset($asignacion['error'])) {
+                $logs[] = "❌ ERROR al asignar soldado {$nombre} (ID: {$sold['id_personal']}): " . ($asignacion['mensaje'] ?? 'Error desconocido');
+            } elseif ($asignacion && !is_array($asignacion)) {
+                $asignaciones[] = $asignacion;
+                $ids_ya_asignados[] = $sold['id_personal'];
+                $logs[] = "✅ Soldado asignado: {$nombre} (ID: {$sold['id_personal']})";
+            } else {
+                $logs[] = "⚠️ Asignación NULL para soldado {$nombre} (ID: {$sold['id_personal']})";
+            }
+        }
+
+        $total = count($asignaciones);
+        $logs[] = "📊 RECONOCIMIENTO RESULTADO FINAL: {$total}/6 personas creadas en BD";
+
+        foreach ($logs as $log) {
+            error_log($log);
+        }
+
+        if ($total < 6) {
+            $mensaje_error = "No hay suficiente personal para RECONOCIMIENTO en {$fecha}. Se necesitan 6, se encontraron {$total}";
+            throw new \Exception($mensaje_error . "\n" . implode("\n", $logs));
+        }
+
+        return $asignaciones;
     }
 
-    private static function asignarCuartelero($fecha, $usuario_id, $id_oficial = null)
+    // ========================================
+    // RESTO DE FUNCIONES (sin cambios necesarios)
+    // ========================================
+
+    private static function obtenerPersonalDisponible($fecha, $tipo, $cantidad, $nombre_servicio, $fecha_exclusion = null, $incluir_grados = null, $modo_emergencia = false, $excluir_ids = [])
     {
+        error_log("📋 Buscando personal: tipo={$tipo}, servicio={$nombre_servicio}, cantidad={$cantidad}");
+
         $fecha_obj = new \DateTime($fecha);
         $dia_semana = $fecha_obj->format('N');
         $dias_desde_lunes = $dia_semana - 1;
@@ -1019,104 +1004,154 @@ class AsignacionServicio extends ActiveRecord
         $lunes_str = $fecha_lunes->format('Y-m-d');
         $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
 
-        $sql = "SELECT p.id_personal,
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_cua
-         INNER JOIN tipos_servicio ts_cua ON a_cua.id_tipo_servicio = ts_cua.id_tipo_servicio
-         WHERE a_cua.id_personal = p.id_personal 
-         AND a_cua.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
-         AND ts_cua.nombre = 'CUARTELERO'
-        ) as veces_cuartelero_semana,
-        
-        COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
-        
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_dia
-         WHERE a_dia.id_personal = p.id_personal 
-         AND a_dia.fecha_servicio = :fecha_check
-        ) as servicios_ese_dia
-        
-    FROM bhr_personal p
-    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-    WHERE p.tipo = 'TROPA'
-        AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
-        AND p.activo = 1
-        AND cd.id_calendario IS NULL
-        AND p.id_personal NOT IN (
-            SELECT id_personal FROM asignaciones_servicio 
-            WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
-            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-        )
-        AND p.id_personal NOT IN (
-            SELECT id_personal FROM asignaciones_servicio 
-            WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
-            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-        )
-    ORDER BY 
-        servicios_ese_dia ASC,
-        veces_cuartelero_semana ASC,
-        dias_ultimo DESC,
-        g.orden ASC,
-        RAND()
-    LIMIT 1";
+        // Construir filtro de grados
+        $filtro_grados = '';
+        $params_grados = [];
+        if ($incluir_grados !== null && is_array($incluir_grados) && count($incluir_grados) > 0) {
+            $placeholders = [];
+            foreach ($incluir_grados as $index => $id_grado) {
+                $key = ":grado_{$index}";
+                $placeholders[] = $key;
+                $params_grados[$key] = $id_grado;
+            }
+            $filtro_grados = "AND p.id_grado IN (" . implode(',', $placeholders) . ")";
+        }
+
+        // Filtro para excluir IDs en memoria
+        $filtro_excluir_ids = '';
+        $params_excluir = [];
+        if (!empty($excluir_ids)) {
+            $placeholders_excluir = [];
+            foreach ($excluir_ids as $index => $id) {
+                $key = ":excluir_{$index}";
+                $placeholders_excluir[] = $key;
+                $params_excluir[$key] = $id;
+            }
+            $filtro_excluir_ids = "AND p.id_personal NOT IN (" . implode(',', $placeholders_excluir) . ")";
+        }
+
+        $exclusion_sql = '';
+        if ($fecha_exclusion && !$modo_emergencia) {
+            $exclusion_sql = "AND p.id_personal NOT IN (
+            SELECT a2.id_personal FROM asignaciones_servicio a2
+            INNER JOIN tipos_servicio ts2 ON a2.id_tipo_servicio = ts2.id_tipo_servicio
+            WHERE a2.fecha_servicio = :fecha_exclusion
+            AND ts2.nombre = 'SERVICIO NOCTURNO'
+        )";
+        }
 
         $params = [
             ':fecha' => $fecha,
             ':fecha2' => $fecha,
-            ':fecha3' => $fecha,
-            ':fecha_check' => $fecha,
+            ':tipo' => $tipo,
+            ':servicio' => $nombre_servicio,
+            ':servicio2' => $nombre_servicio,
+            ':servicio3' => $nombre_servicio,
+            ':cantidad' => (int)$cantidad,
             ':fecha_lunes' => $lunes_str,
             ':fecha_domingo' => $fecha_domingo,
             ':fecha_lunes_count' => $lunes_str,
-            ':fecha_domingo_count' => $fecha_domingo
+            ':fecha_domingo_count' => $fecha_domingo,
+            ':fecha_lunes_count2' => $lunes_str,
+            ':fecha_domingo_count2' => $fecha_domingo
         ];
 
-        $resultado = self::fetchFirst($sql, $params);
+        // ✨ Construir filtro de grupos
+        $filtro_grupos = self::construirFiltroGrupos($params);
 
-        if ($resultado) {
-            if ($resultado['servicios_ese_dia'] == 0) {
-                error_log("✅ CUARTELERO seleccionado SIN otros servicios: ID {$resultado['id_personal']}");
-            } else {
-                error_log("⚠️ CUARTELERO seleccionado CON {$resultado['servicios_ese_dia']} servicios ese día: ID {$resultado['id_personal']}");
-            }
+        // Merge de parámetros
+        $params = array_merge($params, $params_grados, $params_excluir);
 
-            return self::crearAsignacion(
-                $resultado['id_personal'],
-                'CUARTELERO',
-                $fecha,
-                '08:00:00',
-                '07:45:00',
-                $usuario_id,
-                $id_oficial
-            );
+        if ($fecha_exclusion) {
+            $params[':fecha_exclusion'] = $fecha_exclusion;
         }
 
-        error_log("⚠️ NO se encontró CUARTELERO disponible para {$fecha}");
-        return null;
-    }
+        $sql = "SELECT p.id_personal,
+            p.nombres,
+            p.apellidos,
+            g.nombre as grado,
+            
+            (SELECT COUNT(*) 
+             FROM asignaciones_servicio a_count 
+             WHERE a_count.id_personal = p.id_personal 
+             AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
+            ) as servicios_semana_total,
+            
+            (SELECT COUNT(*) 
+             FROM asignaciones_servicio a_count2
+             INNER JOIN tipos_servicio ts_count ON a_count2.id_tipo_servicio = ts_count.id_tipo_servicio
+             WHERE a_count2.id_personal = p.id_personal 
+             AND a_count2.fecha_servicio BETWEEN :fecha_lunes_count2 AND :fecha_domingo_count2
+             AND ts_count.nombre = :servicio3
+            ) as veces_este_servicio,
+            
+            COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
+            COALESCE(hr.prioridad, 0) as prioridad_hist
+            
+        FROM bhr_personal p
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = :servicio)
+        LEFT JOIN exclusiones_servicio ex ON p.id_personal = ex.id_personal
+            AND ex.fecha_exclusion = :fecha2
+            AND ex.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = :servicio2)
+        WHERE p.tipo = :tipo
+            AND p.activo = 1
+            AND cd.id_calendario IS NULL
+            AND ex.id_exclusion IS NULL
+            {$filtro_grupos}
+            {$filtro_grados}
+            {$filtro_excluir_ids}
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+            )
+            {$exclusion_sql}
+        ORDER BY 
+            servicios_semana_total ASC,
+            veces_este_servicio ASC,
+            dias_ultimo DESC,
+            prioridad_hist ASC,
+            g.orden ASC,
+            RAND()
+        LIMIT :cantidad";
 
-    // ========================================
-    // FUNCIONES AUXILIARES
-    // ========================================
+        if ($modo_emergencia) {
+            error_log("🚨 MODO EMERGENCIA ACTIVADO para {$nombre_servicio}");
+        }
 
-    private static function obtenerOficialDisponible($fecha)
-    {
-        $sql = "SELECT p.id_personal, g.nombre as grado, g.orden
-            FROM bhr_personal p
-            INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-            LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-                AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-            WHERE p.tipo = 'OFICIAL'
-                AND p.activo = 1
-                AND cd.id_calendario IS NULL
-            ORDER BY g.orden ASC
-            LIMIT 1";
+        if (!empty($excluir_ids)) {
+            error_log("🚫 Excluyendo IDs en memoria: " . implode(', ', $excluir_ids));
+        }
 
-        return self::fetchFirst($sql, [':fecha' => $fecha]);
+        $personal = self::fetchArray($sql, $params);
+
+        if (empty($personal)) {
+            error_log("❌ No se encontró personal disponible para {$nombre_servicio}");
+
+            if (!$modo_emergencia) {
+                error_log("🚨 Intentando modo emergencia...");
+                return self::obtenerPersonalDisponible(
+                    $fecha,
+                    $tipo,
+                    $cantidad,
+                    $nombre_servicio,
+                    $fecha_exclusion,
+                    $incluir_grados,
+                    true,
+                    $excluir_ids
+                );
+            }
+
+            throw new \Exception("No hay suficiente personal disponible para {$nombre_servicio}");
+        }
+
+        error_log("✅ Personal encontrado: " . count($personal) . " de {$cantidad} solicitados");
+
+        return $personal;
     }
 
     private static function crearAsignacion($id_personal, $nombre_servicio, $fecha, $hora_inicio, $hora_fin, $usuario_id, $id_oficial = null)
@@ -1137,9 +1172,9 @@ class AsignacionServicio extends ActiveRecord
 
             $existe = self::fetchFirst(
                 "SELECT id_asignacion FROM asignaciones_servicio 
-             WHERE id_personal = :id_personal 
-             AND fecha_servicio = :fecha 
-             AND id_tipo_servicio = :id_tipo",
+                 WHERE id_personal = :id_personal 
+                 AND fecha_servicio = :fecha 
+                 AND id_tipo_servicio = :id_tipo",
                 [
                     ':id_personal' => $id_personal,
                     ':fecha' => $fecha,
@@ -1200,9 +1235,9 @@ class AsignacionServicio extends ActiveRecord
     {
         $existe = self::fetchFirst(
             "SELECT id_historial, fecha_ultimo_servicio 
-         FROM historial_rotaciones 
-         WHERE id_personal = :id_personal 
-         AND id_tipo_servicio = :id_tipo_servicio",
+             FROM historial_rotaciones 
+             WHERE id_personal = :id_personal 
+             AND id_tipo_servicio = :id_tipo_servicio",
             [
                 ':id_personal' => $id_personal,
                 ':id_tipo_servicio' => $id_tipo_servicio
@@ -1224,8 +1259,6 @@ class AsignacionServicio extends ActiveRecord
                 ]);
 
                 error_log("📝 Historial actualizado: Personal {$id_personal} - Servicio {$id_tipo_servicio} - Fecha: {$fecha}");
-            } else {
-                error_log("ℹ️ Historial NO actualizado (fecha {$fecha} no es más reciente que {$existe['fecha_ultimo_servicio']})");
             }
         } else {
             $sql = "INSERT INTO historial_rotaciones (id_personal, id_tipo_servicio, fecha_ultimo_servicio, dias_desde_ultimo, prioridad)
@@ -1293,8 +1326,8 @@ class AsignacionServicio extends ActiveRecord
 
             $personal_afectado = self::fetchArray(
                 "SELECT DISTINCT id_personal 
-             FROM asignaciones_servicio 
-             WHERE fecha_servicio BETWEEN :inicio AND :fin",
+                 FROM asignaciones_servicio 
+                 WHERE fecha_servicio BETWEEN :inicio AND :fin",
                 [':inicio' => $fecha_inicio, ':fin' => $fecha_fin]
             );
 
@@ -1356,9 +1389,9 @@ class AsignacionServicio extends ActiveRecord
 
                 $ultima = self::fetchFirst(
                     "SELECT MAX(fecha_servicio) as ultima_fecha
-                 FROM asignaciones_servicio
-                 WHERE id_personal = :id_personal
-                 AND id_tipo_servicio = :id_tipo",
+                     FROM asignaciones_servicio
+                     WHERE id_personal = :id_personal
+                     AND id_tipo_servicio = :id_tipo",
                     [
                         ':id_personal' => $id_personal,
                         ':id_tipo' => $id_tipo
@@ -1369,9 +1402,9 @@ class AsignacionServicio extends ActiveRecord
 
                 $existe = self::fetchFirst(
                     "SELECT id_historial 
-                 FROM historial_rotaciones 
-                 WHERE id_personal = :id_personal 
-                 AND id_tipo_servicio = :id_tipo",
+                     FROM historial_rotaciones 
+                     WHERE id_personal = :id_personal 
+                     AND id_tipo_servicio = :id_tipo",
                     [
                         ':id_personal' => $id_personal,
                         ':id_tipo' => $id_tipo
@@ -1384,10 +1417,10 @@ class AsignacionServicio extends ActiveRecord
 
                         self::ejecutarQuery(
                             "UPDATE historial_rotaciones 
-                         SET fecha_ultimo_servicio = :fecha,
-                             dias_desde_ultimo = :dias
-                         WHERE id_personal = :id_personal 
-                         AND id_tipo_servicio = :id_tipo",
+                             SET fecha_ultimo_servicio = :fecha,
+                                 dias_desde_ultimo = :dias
+                             WHERE id_personal = :id_personal 
+                             AND id_tipo_servicio = :id_tipo",
                             [
                                 ':fecha' => $ultima_fecha,
                                 ':dias' => $dias,
@@ -1398,8 +1431,8 @@ class AsignacionServicio extends ActiveRecord
                     } else {
                         self::ejecutarQuery(
                             "DELETE FROM historial_rotaciones 
-                         WHERE id_personal = :id_personal 
-                         AND id_tipo_servicio = :id_tipo",
+                             WHERE id_personal = :id_personal 
+                             AND id_tipo_servicio = :id_tipo",
                             [
                                 ':id_personal' => $id_personal,
                                 ':id_tipo' => $id_tipo
@@ -1412,8 +1445,8 @@ class AsignacionServicio extends ActiveRecord
 
                         self::ejecutarQuery(
                             "INSERT INTO historial_rotaciones 
-                         (id_personal, id_tipo_servicio, fecha_ultimo_servicio, dias_desde_ultimo, prioridad)
-                         VALUES (:id_personal, :id_tipo, :fecha, :dias, 0)",
+                             (id_personal, id_tipo_servicio, fecha_ultimo_servicio, dias_desde_ultimo, prioridad)
+                             VALUES (:id_personal, :id_tipo, :fecha, :dias, 0)",
                             [
                                 ':id_personal' => $id_personal,
                                 ':id_tipo' => $id_tipo,
