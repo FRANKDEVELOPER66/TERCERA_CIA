@@ -14,26 +14,22 @@ class AsignacionController
     public static function index(Router $router)
     {
         $router->render('asignaciones/index', [
-            'titulo' => 'Generador de Servicios Semanales'
+            'titulo' => 'Generador de Servicios (Ciclos de 10 Días)'
         ]);
     }
 
     /**
-     * ✅ VERSIÓN CORREGIDA - Usa AsignacionServicio:: en lugar de self::
-     * Genera asignaciones para una semana completa con grupos disponibles
+     * ✅ MODIFICADO: Genera ciclo de 10 días con validación de traslapes
      */
     public static function generarSemanaAPI()
     {
         header('Content-Type: application/json; charset=UTF-8');
-
         ob_start();
 
         $debug = [];
-        $debug['paso_1'] = 'Iniciando proceso';
+        $debug['paso_1'] = 'Iniciando proceso de ciclo de 10 días';
 
         $fecha_inicio = $_POST['fecha_inicio'] ?? '';
-
-        // ✨ NUEVO: Recibir grupos disponibles
         $grupos_json = $_POST['grupos_disponibles'] ?? '[]';
         $grupos_disponibles = json_decode($grupos_json, true);
 
@@ -54,16 +50,13 @@ class AsignacionController
             return;
         }
 
-        // ✨ VALIDACIÓN: Si no hay grupos, usar todos por defecto
+        // ✨ Validación: Si no hay grupos, usar todos por defecto
         if (empty($grupos_disponibles)) {
             error_log("⚠️ No se especificaron grupos, usando todos por defecto");
-
-            // ✅ CORRECCIÓN: Usar AsignacionServicio:: en lugar de self::
             $todos_grupos = AsignacionServicio::fetchArray("SELECT id_grupo FROM grupos_descanso", []);
             $grupos_disponibles = array_map(function ($g) {
                 return $g['id_grupo'];
             }, $todos_grupos);
-
             $debug['grupos_usados'] = 'Todos (sin filtro)';
         } else {
             $debug['grupos_usados'] = $grupos_disponibles;
@@ -71,19 +64,9 @@ class AsignacionController
 
         try {
             $fecha = new \DateTime($fecha_inicio);
-            if ($fecha->format('N') != 1) {
-                http_response_code(400);
-                echo json_encode([
-                    'codigo' => 0,
-                    'mensaje' => 'La fecha debe ser un LUNES',
-                    'debug' => $debug
-                ], JSON_UNESCAPED_UNICODE);
-                return;
-            }
-
             $usuario_id = $_SESSION['user_id'] ?? null;
 
-            // ✨ MODIFICADO: Pasar grupos disponibles al generador
+            // ✨ Generar ciclo de 10 días
             $resultado = AsignacionServicio::generarAsignacionesSemanal(
                 $fecha_inicio,
                 $usuario_id,
@@ -126,9 +109,9 @@ class AsignacionController
             ], JSON_UNESCAPED_UNICODE);
         }
     }
+
     /**
-     * ✅ VERSIÓN CORREGIDA: Contar personal disponible SIN calendario de descansos
-     * Este contador muestra cuántas personas REALMENTE están disponibles para trabajar
+     * ✅ Contar personal disponible SIN calendario de descansos
      */
     public static function contarPersonalAPI()
     {
@@ -137,33 +120,20 @@ class AsignacionController
         try {
             $json = file_get_contents('php://input');
             $data = json_decode($json, true);
-
             $grupos = $data['grupos'] ?? [];
 
             error_log("📦 Grupos recibidos para contar: " . json_encode($grupos));
 
-            if (!is_array($grupos)) {
+            if (!is_array($grupos) || empty($grupos)) {
                 http_response_code(400);
                 echo json_encode([
                     'codigo' => 0,
-                    'mensaje' => 'Formato de grupos inválido'
+                    'mensaje' => 'No se proporcionaron grupos válidos'
                 ], JSON_UNESCAPED_UNICODE);
                 return;
             }
 
-            if (empty($grupos)) {
-                http_response_code(400);
-                echo json_encode([
-                    'codigo' => 0,
-                    'mensaje' => 'No se proporcionaron grupos'
-                ], JSON_UNESCAPED_UNICODE);
-                return;
-            }
-
-            // ✨ CAMBIO CLAVE: Necesitamos la fecha actual para verificar descansos
             $fecha_actual = date('Y-m-d');
-
-            // Construir placeholders para grupos
             $placeholders = [];
             $params = [];
 
@@ -175,8 +145,6 @@ class AsignacionController
 
             $in_clause = implode(',', $placeholders);
             $params[':fecha'] = $fecha_actual;
-
-            // ✅ SQL CORREGIDO: Cuenta personal activo + filtra por grupos + excluye calendario descansos
 
             // Contar Oficiales
             $sql_oficiales = "SELECT COUNT(*) as total 
@@ -218,7 +186,6 @@ class AsignacionController
             error_log("🎖️ Tropa disponible: " . ($tropa['total'] ?? 0));
 
             $total = ($oficiales['total'] ?? 0) + ($especialistas['total'] ?? 0) + ($tropa['total'] ?? 0);
-
             error_log("✅ Total personal disponible: " . $total);
 
             http_response_code(200);
@@ -243,7 +210,7 @@ class AsignacionController
     }
 
     /**
-     * Obtiene las asignaciones de una semana específica
+     * ✅ MODIFICADO: Obtiene asignaciones de un ciclo de 10 días
      */
     public static function obtenerSemanaAPI()
     {
@@ -280,7 +247,7 @@ class AsignacionController
     }
 
     /**
-     * Elimina las asignaciones de una semana
+     * ✅ MODIFICADO: Elimina un ciclo de 10 días
      */
     public static function eliminarSemanaAPI()
     {
@@ -303,7 +270,7 @@ class AsignacionController
             http_response_code(200);
             echo json_encode([
                 'codigo' => 1,
-                'mensaje' => 'Asignaciones eliminadas y historial recalculado exitosamente',
+                'mensaje' => 'Ciclo eliminado y historial recalculado exitosamente',
                 'registros_eliminados' => $resultado['resultado'] ?? 0
             ], JSON_UNESCAPED_UNICODE);
         } catch (Exception $e) {
@@ -312,14 +279,16 @@ class AsignacionController
             http_response_code(500);
             echo json_encode([
                 'codigo' => 0,
-                'mensaje' => 'Error al eliminar asignaciones',
+                'mensaje' => 'Error al eliminar ciclo',
                 'detalle' => $e->getMessage(),
             ], JSON_UNESCAPED_UNICODE);
         }
     }
 
     /**
-     * Exporta a PDF las asignaciones de una semana
+     * ✅ MODIFICADO: Exporta PDF de ciclo de 10 días
+     * - 10 páginas individuales (una por día)
+     * - 1 cronograma dividido en 2 tablas de 5 días cada una
      */
     public static function exportarPDF(Router $router)
     {
@@ -331,12 +300,6 @@ class AsignacionController
         }
 
         try {
-            $fecha = new \DateTime($fecha_inicio);
-            if ($fecha->format('N') != 1) {
-                header('Location: /TERCERA_CIA/asignaciones');
-                exit;
-            }
-
             $asignaciones = AsignacionServicio::obtenerAsignacionesSemana($fecha_inicio);
 
             if (empty($asignaciones)) {
@@ -344,6 +307,7 @@ class AsignacionController
                 exit;
             }
 
+            // Agrupar por día
             $dias = [];
             foreach ($asignaciones as $asig) {
                 $fecha_servicio = $asig['fecha_servicio'];
@@ -365,6 +329,7 @@ class AsignacionController
 
             $html = '';
 
+            // ✅ GENERAR 10 PÁGINAS INDIVIDUALES
             $contador_dia = 0;
             foreach ($dias as $fecha_dia => $servicios_dia) {
                 if ($contador_dia > 0) {
@@ -380,11 +345,9 @@ class AsignacionController
 
                 foreach ($servicios_dia as $servicio) {
                     $tipo = $servicio['servicio'];
-
                     if (!isset($servicios_agrupados[$tipo])) {
                         $servicios_agrupados[$tipo] = [];
                     }
-
                     $servicios_agrupados[$tipo][] = $servicio;
 
                     if (!empty($servicio['oficial_encargado'])) {
@@ -396,12 +359,13 @@ class AsignacionController
                 $contador_dia++;
             }
 
+            // ✅ GENERAR CRONOGRAMA EN 2 TABLAS DE 5 DÍAS
             $html .= '<pagebreak />';
-            $html .= self::generarCronogramaSemanal($asignaciones, $fecha_inicio);
+            $html .= self::generarCronogramaCiclo($asignaciones, $fecha_inicio);
 
             $mpdf->WriteHTML($html);
 
-            $nombreArchivo = 'servicios_semana_' . $fecha_inicio . '.pdf';
+            $nombreArchivo = 'servicios_ciclo_' . $fecha_inicio . '.pdf';
             $mpdf->Output($nombreArchivo, 'I');
         } catch (\Exception $e) {
             error_log("Error al generar PDF: " . $e->getMessage());
@@ -410,30 +374,9 @@ class AsignacionController
         }
     }
 
-    private static function formatearFechaEspanol($fecha_obj)
-    {
-        $meses = [
-            1 => 'enero',
-            2 => 'febrero',
-            3 => 'marzo',
-            4 => 'abril',
-            5 => 'mayo',
-            6 => 'junio',
-            7 => 'julio',
-            8 => 'agosto',
-            9 => 'septiembre',
-            10 => 'octubre',
-            11 => 'noviembre',
-            12 => 'diciembre'
-        ];
-
-        $dia = $fecha_obj->format('d');
-        $mes = $meses[(int)$fecha_obj->format('m')];
-        $anio = $fecha_obj->format('Y');
-
-        return "{$dia} de {$mes} de {$anio}";
-    }
-
+    /**
+     * ✅ Genera página individual de un día
+     */
     private static function generarPaginaDia($dia_nombre, $fecha_formateada, $oficial_dia, $servicios_agrupados)
     {
         $html = '
@@ -448,7 +391,7 @@ class AsignacionController
         if (!empty($oficial_dia)) {
             $html .= '
         <div style="background: #2d5016; color: white; padding: 10px; border-radius: 8px; text-align: center; margin-top: 10px;">
-            <strong> OFICIAL ENCARGADO:</strong> ' . htmlspecialchars($oficial_dia) . '
+            <strong>OFICIAL ENCARGADO:</strong> ' . htmlspecialchars($oficial_dia) . '
         </div>';
         }
 
@@ -470,7 +413,6 @@ class AsignacionController
 
             $color = $colores[$tipo_servicio] ?? '#2d5016';
             $personal = $servicios_agrupados[$tipo_servicio];
-
             $nombre_mostrar = ($tipo_servicio === 'TACTICO') ? 'TÁCTICO' : $tipo_servicio;
 
             if ($tipo_servicio === 'CUARTELERO') {
@@ -490,7 +432,6 @@ class AsignacionController
 
                 foreach ($personal as $index => $persona) {
                     $turno_texto = $turnos[$index] ?? '';
-
                     $grado_completo = htmlspecialchars($persona['grado']);
                     if (!empty($persona['tipo_personal']) && $persona['tipo_personal'] === 'ESPECIALISTA') {
                         $grado_completo .= ' ESPECIALISTA';
@@ -525,72 +466,78 @@ class AsignacionController
         return $html;
     }
 
-    private static function generarCronogramaSemanal($asignaciones, $fecha_inicio)
+    /**
+     * ✅ MODIFICADO: Genera cronograma dividido en 2 tablas de 5 días cada una
+     */
+    private static function generarCronogramaCiclo($asignaciones, $fecha_inicio)
     {
         $fecha_inicio_obj = new \DateTime($fecha_inicio);
         $fecha_fin_obj = new \DateTime($fecha_inicio);
-        $fecha_fin_obj->modify('+6 days');
+        $fecha_fin_obj->modify('+9 days');
 
         $fecha_inicio_formateada = self::formatearFechaEspanol($fecha_inicio_obj);
         $fecha_fin_formateada = self::formatearFechaEspanol($fecha_fin_obj);
 
         $html = '
     <div style="text-align: center; margin-bottom: 20px;">
-        <h1 style="color: #2d5016; margin: 0;">CRONOGRAMA SEMANAL</h1>
+        <h1 style="color: #2d5016; margin: 0;">CRONOGRAMA CICLO 10 DÍAS</h1>
         <h3 style="color: #ff7b00; margin: 5px 0;">Del ' . $fecha_inicio_formateada . ' al ' . $fecha_fin_formateada . '</h3>
     </div>';
 
-        // ✅ CAMBIO CLAVE: Solo procesar personal que REALMENTE tiene servicios asignados
+        // Procesar personal y servicios
+        $serviciosSemana = array_filter($asignaciones, fn($a) => $a['servicio'] === 'Semana');
+        $serviciosDiarios = array_filter($asignaciones, fn($a) => $a['servicio'] !== 'Semana');
+
         $personal_servicios = [];
 
-        foreach ($asignaciones as $asig) {
+        foreach ($serviciosDiarios as $asig) {
             $id = $asig['id_personal'];
-            $dia_num = date('N', strtotime($asig['fecha_servicio']));
+            $fecha_servicio = $asig['fecha_servicio'];
+            $dia_num = (new \DateTime($fecha_servicio))->diff(new \DateTime($fecha_inicio))->days + 1;
 
-            // ✅ IMPORTANTE: Solo agregar si NO existe todavía
             if (!isset($personal_servicios[$id])) {
                 $personal_servicios[$id] = [
                     'nombre' => $asig['nombre_completo'],
                     'grado' => $asig['grado'],
-                    'tipo' => $asig['tipo_personal'],  // ✅ Guardar tipo AQUÍ
+                    'tipo' => $asig['tipo_personal'],
                     'servicios' => [],
                     'tiene_semana' => false
                 ];
 
-                // Inicializar días vacíos
-                for ($d = 1; $d <= 7; $d++) {
+                for ($d = 1; $d <= 10; $d++) {
                     $personal_servicios[$id]['servicios'][$d] = [];
                 }
             }
 
-            // Si es servicio SEMANA, llenar todos los días
-            if ($asig['servicio'] === 'Semana') {
-                $personal_servicios[$id]['tiene_semana'] = true;
-                for ($d = 1; $d <= 7; $d++) {
-                    $personal_servicios[$id]['servicios'][$d] = ['SEM'];
-                }
-                continue;
-            }
-
-            // Obtener abreviatura del servicio
             $abrev = self::getAbreviatura($asig['servicio']);
-
-            // Si es servicio nocturno, agregar número de turno
             if ($asig['servicio'] === 'SERVICIO NOCTURNO') {
                 $turno = self::obtenerNumeroTurno($asig, $asignaciones);
-                $turnos_texto = [
-                    1 => '1ER TURNO',
-                    2 => '2DO TURNO',
-                    3 => '3ER TURNO'
-                ];
+                $turnos_texto = [1 => '1ER TURNO', 2 => '2DO TURNO', 3 => '3ER TURNO'];
                 $abrev = $turnos_texto[$turno] ?? 'TURNO ' . $turno;
             }
 
-            // Agregar servicio al día correspondiente
             $personal_servicios[$id]['servicios'][$dia_num][] = $abrev;
         }
 
-        // ✅ Calcular total de servicios por persona
+        // Procesar servicio SEMANA
+        foreach ($serviciosSemana as $s) {
+            $id = $s['id_personal'];
+            if (!isset($personal_servicios[$id])) {
+                $personal_servicios[$id] = [
+                    'nombre' => $s['nombre_completo'],
+                    'grado' => $s['grado'],
+                    'tipo' => $s['tipo_personal'],
+                    'servicios' => [],
+                    'tiene_semana' => true
+                ];
+
+                for ($d = 1; $d <= 10; $d++) {
+                    $personal_servicios[$id]['servicios'][$d] = ['SEM'];
+                }
+            }
+        }
+
+        // Calcular totales
         foreach ($personal_servicios as $id => &$persona) {
             $total = 0;
             foreach ($persona['servicios'] as $dia) {
@@ -600,20 +547,14 @@ class AsignacionController
         }
         unset($persona);
 
-        // ✅ Ordenar: 1) ESPECIALISTA primero, 2) Por grado, 3) Por total servicios
+        // Ordenar
         uasort($personal_servicios, function ($a, $b) {
-            // 1. Primero ESPECIALISTAS
             $tipo_a = $a['tipo'] ?? 'TROPA';
             $tipo_b = $b['tipo'] ?? 'TROPA';
 
-            if ($tipo_a === 'ESPECIALISTA' && $tipo_b !== 'ESPECIALISTA') {
-                return -1;
-            }
-            if ($tipo_a !== 'ESPECIALISTA' && $tipo_b === 'ESPECIALISTA') {
-                return 1;
-            }
+            if ($tipo_a === 'ESPECIALISTA' && $tipo_b !== 'ESPECIALISTA') return -1;
+            if ($tipo_a !== 'ESPECIALISTA' && $tipo_b === 'ESPECIALISTA') return 1;
 
-            // 2. Luego por grado
             $orden_grados = [
                 'Soldado de Primera' => 1,
                 'Soldado de Segunda' => 2,
@@ -625,45 +566,77 @@ class AsignacionController
             $grado_a = $orden_grados[$a['grado']] ?? 999;
             $grado_b = $orden_grados[$b['grado']] ?? 999;
 
-            if ($grado_a !== $grado_b) {
-                return $grado_a - $grado_b;
-            }
+            if ($grado_a !== $grado_b) return $grado_a - $grado_b;
 
-            // 3. Finalmente por total de servicios
             return $a['total_servicios'] - $b['total_servicios'];
         });
 
-        // ✅ Generar tabla HTML
+        // ✅ GENERAR 2 TABLAS DE 5 DÍAS CADA UNA
+        $html .= self::generarTablaRango($personal_servicios, 1, 5, "DÍAS 1-5");
+        $html .= '<div style="height: 30px;"></div>'; // Separador
+        $html .= self::generarTablaRango($personal_servicios, 6, 10, "DÍAS 6-10");
+
+        // Leyenda
         $html .= '
-    <table style="width: 100%; border-collapse: collapse; font-size: 9px;">
-        <thead>
-            <tr style="background: #2d5016; color: white;">
-                <th style="border: 1px solid #ddd; padding: 8px; text-align: left; width: 28%;">NOMBRE</th>
-                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">L</th>
-                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">M</th>
-                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">M</th>
-                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">J</th>
-                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">V</th>
-                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">S</th>
-                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 10%;">D</th>
-                <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 7%;">TOTAL</th>
+    <div style="margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 8px; page-break-inside: avoid;">
+        <h4 style="margin: 0 0 8px 0; font-size: 11px;">LEYENDA DE SERVICIOS</h4>
+        <table style="width: 100%; font-size: 9px;">
+            <tr>
+                <td><strong style="color: #ff9966;">SEM</strong> = Semana (10 días completos)</td>
+                <td><strong style="color: #c85a28;">TACTICO</strong> = Táctico (Especialista)</td>
+                <td><strong style="color: #d4763b;">TAC-T</strong> = Táctico Tropa</td>
             </tr>
-        </thead>
-        <tbody>';
+            <tr>
+                <td><strong style="color: #2d5016;">ERI</strong> = Reconocimiento</td>
+                <td><strong style="color: #1a472a;">1ER/2DO/3ER TURNO</strong> = Servicio Nocturno</td>
+                <td><strong style="color: #b8540f;">BANDERIN</strong> = Banderín</td>
+            </tr>
+            <tr>
+                <td><strong style="color: #3d6b1f;">CUARTELERO</strong> = Cuartelero (Cuarto Turno)</td>
+                <td colspan="2"></td>
+            </tr>
+        </table>
+    </div>';
+
+        return $html;
+    }
+
+    /**
+     * ✅ NUEVA FUNCIÓN: Genera una tabla para un rango de días específico
+     */
+    private static function generarTablaRango($personal_servicios, $dia_inicio, $dia_fin, $titulo)
+    {
+        $html = '
+    <div style="page-break-inside: avoid;">
+        <h2 style="color: #2d5016; text-align: center; margin: 10px 0;">' . $titulo . '</h2>
+        <table style="width: 100%; border-collapse: collapse; font-size: 9px;">
+            <thead>
+                <tr style="background: #2d5016; color: white;">
+                    <th style="border: 1px solid #ddd; padding: 8px; text-align: left; width: 23%;">NOMBRE</th>';
+
+        // Headers de días
+        for ($dia = $dia_inicio; $dia <= $dia_fin; $dia++) {
+            $html .= '<th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 12%;">DÍA ' . $dia . '</th>';
+        }
+
+        $html .= '
+                    <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 7%;">TOTAL</th>
+                </tr>
+            </thead>
+            <tbody>';
 
         $contador = 0;
         $tipo_anterior = null;
 
         foreach ($personal_servicios as $persona) {
             $bgColor = ($contador % 2 == 0) ? '#f8f9fa' : '#ffffff';
-
             $tipo_actual = $persona['tipo'] ?? 'TROPA';
 
-            // Agregar separador entre ESPECIALISTAS y TROPA
+            // Separador entre ESPECIALISTAS y TROPA
             if ($tipo_anterior !== null && $tipo_anterior !== $tipo_actual) {
                 $html .= '
             <tr>
-                <td colspan="9" style="background: #2d5016; height: 3px; padding: 0;"></td>
+                <td colspan="' . (($dia_fin - $dia_inicio + 1) + 2) . '" style="background: #2d5016; height: 3px; padding: 0;"></td>
             </tr>';
             }
 
@@ -676,7 +649,7 @@ class AsignacionController
             </td>';
 
             // Generar columnas de días
-            for ($dia = 1; $dia <= 7; $dia++) {
+            for ($dia = $dia_inicio; $dia <= $dia_fin; $dia++) {
                 $servicios_dia = $persona['servicios'][$dia];
 
                 if (empty($servicios_dia)) {
@@ -685,14 +658,12 @@ class AsignacionController
                     -
                 </td>';
                 } else {
-                    // Si tiene SEMANA
                     if (in_array('SEM', $servicios_dia)) {
                         $html .= '
                     <td style="border: 1px solid #ddd; padding: 4px; text-align: center; font-weight: bold; color: #ff9966; font-size: 10px;">
                         SEM
                     </td>';
                     } else {
-                        // Mostrar todos los servicios
                         $servicios_html = [];
                         foreach ($servicios_dia as $serv) {
                             $color = self::getColorAbreviatura($serv);
@@ -719,31 +690,38 @@ class AsignacionController
 
         $html .= '
         </tbody>
-    </table>';
-
-        // Leyenda
-        $html .= '
-    <div style="margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 8px;">
-        <h4 style="margin: 0 0 8px 0; font-size: 11px;">LEYENDA DE SERVICIOS</h4>
-        <table style="width: 100%; font-size: 9px;">
-            <tr>
-                <td><strong style="color: #ff9966;">SEM</strong> = Semana (toda la semana)</td>
-                <td><strong style="color: #c85a28;">TACTICO</strong> = Táctico (Especialista)</td>
-                <td><strong style="color: #d4763b;">TAC-T</strong> = Táctico Tropa</td>
-            </tr>
-            <tr>
-                <td><strong style="color: #2d5016;">ERI</strong> = Reconocimiento</td>
-                <td><strong style="color: #1a472a;">1ER/2DO/3ER TURNO</strong> = Servicio Nocturno</td>
-                <td><strong style="color: #b8540f;">BANDERIN</strong> = Banderín</td>
-            </tr>
-            <tr>
-                <td><strong style="color: #3d6b1f;">CUARTELERO</strong> = Cuartelero (Cuarto Turno)</td>
-                <td colspan="2"></td>
-            </tr>
-        </table>
+    </table>
     </div>';
 
         return $html;
+    }
+
+    // ========================================
+    // FUNCIONES AUXILIARES
+    // ========================================
+
+    private static function formatearFechaEspanol($fecha_obj)
+    {
+        $meses = [
+            1 => 'enero',
+            2 => 'febrero',
+            3 => 'marzo',
+            4 => 'abril',
+            5 => 'mayo',
+            6 => 'junio',
+            7 => 'julio',
+            8 => 'agosto',
+            9 => 'septiembre',
+            10 => 'octubre',
+            11 => 'noviembre',
+            12 => 'diciembre'
+        ];
+
+        $dia = $fecha_obj->format('d');
+        $mes = $meses[(int)$fecha_obj->format('m')];
+        $anio = $fecha_obj->format('Y');
+
+        return "{$dia} de {$mes} de {$anio}";
     }
 
     private static function obtenerNumeroTurno($asignacion_actual, $todas_asignaciones)
@@ -790,9 +768,7 @@ class AsignacionController
 
     private static function getColorAbreviatura($abrev)
     {
-        if (strpos($abrev, 'TAC-T') === 0) {
-            return '#d4763b';
-        }
+        if (strpos($abrev, 'TAC-T') === 0) return '#d4763b';
 
         $servicio_base = substr($abrev, 0, 3);
 

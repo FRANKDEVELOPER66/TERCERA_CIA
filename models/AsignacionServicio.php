@@ -4,7 +4,6 @@ namespace Model;
 
 class AsignacionServicio extends ActiveRecord
 {
-    // ✨ VARIABLE ESTÁTICA: Para almacenar grupos disponibles
     private static $grupos_disponibles_actuales = [];
 
     protected static $tabla = 'asignaciones_servicio';
@@ -47,7 +46,7 @@ class AsignacionServicio extends ActiveRecord
     }
 
     /**
-     * ✅ FUNCIÓN AUXILIAR: Construir filtro de grupos
+     * ✅ Función auxiliar para construir filtro de grupos
      */
     private static function construirFiltroGrupos(&$params)
     {
@@ -62,13 +61,14 @@ class AsignacionServicio extends ActiveRecord
             }
             $filtro = "AND p.id_grupo_descanso IN (" . implode(',', $placeholders) . ")";
             error_log("🔍 Filtro de grupos aplicado: " . $filtro);
-        } else {
-            error_log("⚠️ Sin filtro de grupos - se usará todo el personal activo");
         }
 
         return $filtro;
     }
 
+    /**
+     * ✅ MODIFICADO: Ahora genera 10 días consecutivos
+     */
     public static function generarAsignacionesSemanal($fecha_inicio, $usuario_id = null, $grupos_disponibles = [])
     {
         $resultado = [
@@ -82,16 +82,20 @@ class AsignacionServicio extends ActiveRecord
 
         try {
             $fecha = new \DateTime($fecha_inicio);
-            if ($fecha->format('N') != 1) {
-                $resultado['mensaje'] = 'La fecha debe ser un lunes';
+
+            // ✨ NUEVO: Validar que no haya traslape con otros ciclos
+            $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio . ' +9 days'));
+
+            $traslape = self::verificarTraslapeCiclo($fecha_inicio, $fecha_fin_ciclo);
+            if ($traslape) {
+                $resultado['mensaje'] = 'Ya existe un ciclo en este rango de fechas. Debe eliminar el ciclo existente primero.';
+                $resultado['debug']['traslape'] = $traslape;
                 return $resultado;
             }
 
-            // ✨ GUARDAR grupos disponibles globalmente
+            // Guardar grupos disponibles
             self::$grupos_disponibles_actuales = $grupos_disponibles;
-            error_log("🎯 Grupos disponibles para esta semana: " . json_encode($grupos_disponibles));
-
-            $fecha_domingo = date('Y-m-d', strtotime($fecha_inicio . ' +6 days'));
+            error_log("🎯 Grupos disponibles para este ciclo de 10 días: " . json_encode($grupos_disponibles));
 
             // 1️⃣ Obtener personal afectado
             error_log("📋 Obteniendo personal afectado por regeneración...");
@@ -99,23 +103,22 @@ class AsignacionServicio extends ActiveRecord
                 "SELECT DISTINCT id_personal 
                  FROM asignaciones_servicio 
                  WHERE fecha_servicio BETWEEN :inicio AND :fin",
-                [':inicio' => $fecha_inicio, ':fin' => $fecha_domingo]
+                [':inicio' => $fecha_inicio, ':fin' => $fecha_fin_ciclo]
             );
 
             error_log("👥 Personal afectado: " . count($personal_a_recalcular) . " personas");
 
-            // 2️⃣ Eliminar asignaciones antiguas
-            error_log("🗑️ Limpiando asignaciones de {$fecha_inicio} a {$fecha_domingo}");
+            // 2️⃣ Eliminar asignaciones antiguas del ciclo
+            error_log("🗑️ Limpiando asignaciones de {$fecha_inicio} a {$fecha_fin_ciclo}");
             $eliminadas = self::ejecutarQuery(
                 "DELETE FROM asignaciones_servicio 
                  WHERE fecha_servicio BETWEEN :inicio AND :fin",
-                [':inicio' => $fecha_inicio, ':fin' => $fecha_domingo]
+                [':inicio' => $fecha_inicio, ':fin' => $fecha_fin_ciclo]
             );
 
             error_log("✅ Asignaciones eliminadas: " . ($eliminadas['resultado'] ?? 0));
 
             // 3️⃣ Recalcular historial
-            error_log("🔄 Recalculando historial para personal afectado...");
             foreach ($personal_a_recalcular as $persona) {
                 self::recalcularHistorialPersona($persona['id_personal']);
             }
@@ -123,19 +126,18 @@ class AsignacionServicio extends ActiveRecord
 
             // 4️⃣ Actualizar días desde último servicio
             self::actualizarDiasDesdeUltimo();
-            error_log("✅ Días desde último servicio actualizados globalmente");
 
             $asignaciones_creadas = [];
 
-            // 5️⃣ Generar asignaciones para los 7 días
-            for ($dia = 0; $dia < 7; $dia++) {
+            // 5️⃣ Generar asignaciones para los 10 días
+            for ($dia = 0; $dia < 10; $dia++) {
                 $fecha_servicio = clone $fecha;
                 $fecha_servicio->modify("+{$dia} days");
                 $fecha_str = $fecha_servicio->format('Y-m-d');
 
                 try {
-                    error_log("📅 Generando servicios para: {$fecha_str}");
-                    $servicios_dia = self::generarServiciosPorDia($fecha_str, $usuario_id);
+                    error_log("📅 Generando servicios para: {$fecha_str} (Día " . ($dia + 1) . "/10)");
+                    $servicios_dia = self::generarServiciosPorDia($fecha_str, $usuario_id, $dia, $fecha_inicio);
 
                     $asignaciones_creadas = array_merge($asignaciones_creadas, $servicios_dia);
 
@@ -148,7 +150,7 @@ class AsignacionServicio extends ActiveRecord
                     error_log("✅ Día completado: {$fecha_str} - " . count($servicios_dia) . " asignaciones");
                 } catch (\Exception $e) {
                     error_log("❌ Error en {$fecha_str}: " . $e->getMessage());
-                    error_log("🔄 Haciendo rollback de toda la semana...");
+                    error_log("🔄 Haciendo rollback del ciclo completo...");
 
                     self::ejecutarQuery(
                         "DELETE FROM asignaciones_servicio 
@@ -165,20 +167,13 @@ class AsignacionServicio extends ActiveRecord
                         'error' => $e->getMessage()
                     ];
 
-                    $resultado['detalle_por_dia'][$fecha_str] = [
-                        'fecha' => $fecha_str,
-                        'total' => 0,
-                        'exito' => false,
-                        'error' => $e->getMessage()
-                    ];
-
                     throw new \Exception("Error en {$fecha_str}: " . $e->getMessage());
                 }
             }
 
             // 6️⃣ Éxito
             $resultado['exito'] = true;
-            $resultado['mensaje'] = 'Asignaciones generadas exitosamente para toda la semana';
+            $resultado['mensaje'] = 'Asignaciones generadas exitosamente para el ciclo de 10 días';
             $resultado['asignaciones'] = $asignaciones_creadas;
 
             error_log("🎉 GENERACIÓN COMPLETA: " . count($asignaciones_creadas) . " asignaciones totales");
@@ -196,20 +191,56 @@ class AsignacionServicio extends ActiveRecord
         }
     }
 
-    private static function generarServiciosPorDia($fecha, $usuario_id = null)
+    /**
+     * ✨ NUEVA FUNCIÓN: Verificar si hay traslape de ciclos
+     */
+    private static function verificarTraslapeCiclo($fecha_inicio, $fecha_fin)
+    {
+        $sql = "SELECT COUNT(*) as total
+                FROM asignaciones_servicio
+                WHERE fecha_servicio BETWEEN :inicio AND :fin";
+
+        $resultado = self::fetchFirst($sql, [
+            ':inicio' => $fecha_inicio,
+            ':fin' => $fecha_fin
+        ]);
+
+        if ($resultado && $resultado['total'] > 0) {
+            $detalle = self::fetchFirst(
+                "SELECT MIN(fecha_servicio) as fecha_inicio, MAX(fecha_servicio) as fecha_fin
+                 FROM asignaciones_servicio
+                 WHERE fecha_servicio BETWEEN :inicio AND :fin",
+                [':inicio' => $fecha_inicio, ':fin' => $fecha_fin]
+            );
+
+            return [
+                'inicio' => $detalle['fecha_inicio'],
+                'fin' => $detalle['fecha_fin']
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * ✅ MODIFICADO: Ahora recibe el día del ciclo y fecha de inicio
+     */
+    private static function generarServiciosPorDia($fecha, $usuario_id, $dia_ciclo, $fecha_inicio_ciclo)
     {
         $asignaciones = [];
         $oficial = self::obtenerOficialDisponible($fecha);
         $id_oficial = $oficial ? $oficial['id_personal'] : null;
 
-        error_log("🔷 === GENERANDO SERVICIOS PARA: {$fecha} ===");
+        error_log("🔷 === GENERANDO SERVICIOS PARA: {$fecha} (Día " . ($dia_ciclo + 1) . "/10) ===");
 
         try {
-            // 1. SEMANA (solo lunes)
-            $semana = self::asignarSemana($fecha, $usuario_id, $id_oficial);
-            if ($semana && !is_array($semana)) {
-                $asignaciones[] = $semana;
-                error_log("✅ SEMANA asignado");
+            // 1. SEMANA - Solo el primer día del ciclo
+            if ($dia_ciclo === 0) {
+                $semana = self::asignarSemana($fecha, $usuario_id, $id_oficial, $fecha_inicio_ciclo);
+                if ($semana && !is_array($semana)) {
+                    $asignaciones[] = $semana;
+                    error_log("✅ SEMANA asignado (10 días completos)");
+                }
             }
 
             // 2. TÁCTICO
@@ -263,10 +294,8 @@ class AsignacionServicio extends ActiveRecord
             error_log("✅ SERVICIO NOCTURNO asignado (" . count($nocturno) . " personas)");
 
             // VALIDACIÓN FINAL
-            $fecha_obj = new \DateTime($fecha);
-            $es_lunes = ($fecha_obj->format('N') == 1);
-
-            $total_esperado = $es_lunes ? 13 : 12;
+            $es_primer_dia = ($dia_ciclo === 0);
+            $total_esperado = $es_primer_dia ? 13 : 12;
             $total_generado = count($asignaciones);
 
             error_log("📊 RESUMEN {$fecha}: {$total_generado}/{$total_esperado} asignaciones");
@@ -274,8 +303,6 @@ class AsignacionServicio extends ActiveRecord
             if ($total_generado < $total_esperado) {
                 throw new \Exception("Asignaciones incompletas para {$fecha}: {$total_generado}/{$total_esperado}");
             }
-
-            error_log("✅ ÉXITO: Día completo con {$total_generado} asignaciones");
 
             return $asignaciones;
         } catch (\Exception $e) {
@@ -285,12 +312,9 @@ class AsignacionServicio extends ActiveRecord
     }
 
     // ========================================
-    // ✅ FUNCIONES DE ASIGNACIÓN CORREGIDAS
+    // ✅ FUNCIONES DE ASIGNACIÓN COMPLETAS
     // ========================================
 
-    /**
-     * ✅ CORREGIDO: Ahora usa filtro de grupos
-     */
     private static function obtenerOficialDisponible($fecha)
     {
         $params = [':fecha' => $fecha];
@@ -312,21 +336,14 @@ class AsignacionServicio extends ActiveRecord
     }
 
     /**
-     * ✅ CORREGIDO: SEMANA con filtro de grupos
+     * ✅ COMPLETO: SEMANA ahora cubre 10 días
      */
-    private static function asignarSemana($fecha, $usuario_id, $id_oficial = null)
+    private static function asignarSemana($fecha, $usuario_id, $id_oficial, $fecha_inicio_ciclo)
     {
-        $fecha_obj = new \DateTime($fecha);
-        $dia_semana = $fecha_obj->format('N');
-
-        if ($dia_semana != 1) {
-            return null;
-        }
-
-        $fecha_fin = date('Y-m-d', strtotime($fecha . ' +6 days'));
+        $fecha_fin = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
         $params = [
             ':fecha' => $fecha,
-            ':fecha_inicio' => $fecha,
+            ':fecha_inicio' => $fecha_inicio_ciclo,
             ':fecha_fin' => $fecha_fin
         ];
 
@@ -372,24 +389,32 @@ class AsignacionServicio extends ActiveRecord
     }
 
     /**
-     * ✅ CORREGIDO: TÁCTICO con filtro de grupos
+     * ✅ COMPLETO: TÁCTICO con rangos de 10 días
      */
     private static function asignarTactico($fecha, $usuario_id, $id_oficial = null)
     {
-        $fecha_obj = new \DateTime($fecha);
-        $dia_semana = $fecha_obj->format('N');
-        $dias_desde_lunes = $dia_semana - 1;
-        $fecha_lunes = clone $fecha_obj;
-        $fecha_lunes->modify("-{$dias_desde_lunes} days");
-        $lunes_str = $fecha_lunes->format('Y-m-d');
-        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
+        // Calcular inicio del ciclo actual
+        $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio
+                            FROM asignaciones_servicio
+                            WHERE fecha_servicio <= :fecha
+                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
+
+        $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
+
+        if ($ciclo && $ciclo['inicio']) {
+            $fecha_inicio_ciclo = $ciclo['inicio'];
+        } else {
+            $fecha_inicio_ciclo = $fecha;
+        }
+
+        $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
 
         $params = [
             ':fecha' => $fecha,
-            ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo,
-            ':fecha_lunes_count' => $lunes_str,
-            ':fecha_domingo_count' => $fecha_domingo,
+            ':fecha_inicio' => $fecha_inicio_ciclo,
+            ':fecha_fin' => $fecha_fin_ciclo,
+            ':fecha_inicio_count' => $fecha_inicio_ciclo,
+            ':fecha_fin_count' => $fecha_fin_ciclo,
             ':fecha_cuartelero' => $fecha
         ];
 
@@ -400,7 +425,7 @@ class AsignacionServicio extends ActiveRecord
              FROM asignaciones_servicio a_count 
              INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
              WHERE a_count.id_personal = p.id_personal 
-             AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
+             AND a_count.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
              AND ts_count.nombre = 'TACTICO'
             ) as veces_tactico
         FROM bhr_personal p
@@ -414,7 +439,7 @@ class AsignacionServicio extends ActiveRecord
             {$filtro_grupos}
             AND p.id_personal NOT IN (
                 SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
                 AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
             )
             AND p.id_personal NOT IN (
@@ -446,24 +471,26 @@ class AsignacionServicio extends ActiveRecord
     }
 
     /**
-     * ✅ CORREGIDO: TÁCTICO TROPA con filtro de grupos
+     * ✅ COMPLETO: TÁCTICO TROPA con rangos de 10 días
      */
     private static function asignarTacticoTropa($fecha, $usuario_id, $id_oficial = null)
     {
-        $fecha_obj = new \DateTime($fecha);
-        $dia_semana = $fecha_obj->format('N');
-        $dias_desde_lunes = $dia_semana - 1;
-        $fecha_lunes = clone $fecha_obj;
-        $fecha_lunes->modify("-{$dias_desde_lunes} days");
-        $lunes_str = $fecha_lunes->format('Y-m-d');
-        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
+        // Calcular rango del ciclo
+        $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
+                            FROM asignaciones_servicio 
+                            WHERE fecha_servicio <= :fecha 
+                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
+
+        $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
+        $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
+        $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
 
         $params = [
             ':fecha' => $fecha,
-            ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo,
-            ':fecha_lunes_count' => $lunes_str,
-            ':fecha_domingo_count' => $fecha_domingo,
+            ':fecha_inicio' => $fecha_inicio_ciclo,
+            ':fecha_fin' => $fecha_fin_ciclo,
+            ':fecha_inicio_count' => $fecha_inicio_ciclo,
+            ':fecha_fin_count' => $fecha_fin_ciclo,
             ':fecha_cuartelero' => $fecha
         ];
 
@@ -474,7 +501,7 @@ class AsignacionServicio extends ActiveRecord
          FROM asignaciones_servicio a_count 
          INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
          WHERE a_count.id_personal = p.id_personal 
-         AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
+         AND a_count.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
          AND ts_count.nombre = 'TACTICO TROPA'
         ) as veces_tactico_tropa
         FROM bhr_personal p
@@ -490,7 +517,7 @@ class AsignacionServicio extends ActiveRecord
             {$filtro_grupos}
             AND p.id_personal NOT IN (
                 SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
                 AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
             )
             AND p.id_personal NOT IN (
@@ -522,312 +549,7 @@ class AsignacionServicio extends ActiveRecord
     }
 
     /**
-     * ✅ CORREGIDO: BANDERÍN con filtro de grupos
-     */
-    private static function asignarBanderin($fecha, $usuario_id, $id_oficial = null)
-    {
-        $fecha_obj = new \DateTime($fecha);
-        $dia_semana = $fecha_obj->format('N');
-        $dias_desde_lunes = $dia_semana - 1;
-        $fecha_lunes = clone $fecha_obj;
-        $fecha_lunes->modify("-{$dias_desde_lunes} days");
-        $lunes_str = $fecha_lunes->format('Y-m-d');
-        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
-
-        $params = [
-            ':fecha' => $fecha,
-            ':fecha2' => $fecha,
-            ':fecha3' => $fecha,
-            ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo,
-            ':fecha_cuartelero' => $fecha
-        ];
-
-        $filtro_grupos = self::construirFiltroGrupos($params);
-
-        $sql = "SELECT p.id_personal
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
-        WHERE p.tipo = 'TROPA'
-            AND g.nombre LIKE 'Sargento%'
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            {$filtro_grupos}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
-            )
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio = :fecha_cuartelero
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-            )
-        ORDER BY 
-            COALESCE(hr.dias_desde_ultimo, 999) DESC,
-            g.orden ASC,
-            RAND()
-        LIMIT 1";
-
-        $resultado = self::fetchFirst($sql, $params);
-
-        if ($resultado) {
-            return self::crearAsignacion(
-                $resultado['id_personal'],
-                'BANDERÍN',
-                $fecha,
-                '06:00:00',
-                '20:00:00',
-                $usuario_id,
-                $id_oficial
-            );
-        }
-
-        return null;
-    }
-
-    /**
-     * ✅ CORREGIDO: CUARTELERO con filtro de grupos
-     */
-    private static function asignarCuartelero($fecha, $usuario_id, $id_oficial = null)
-    {
-        $fecha_obj = new \DateTime($fecha);
-        $dia_semana = $fecha_obj->format('N');
-        $dias_desde_lunes = $dia_semana - 1;
-        $fecha_lunes = clone $fecha_obj;
-        $fecha_lunes->modify("-{$dias_desde_lunes} days");
-        $lunes_str = $fecha_lunes->format('Y-m-d');
-        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
-
-        $params = [
-            ':fecha' => $fecha,
-            ':fecha2' => $fecha,
-            ':fecha3' => $fecha,
-            ':fecha_check' => $fecha,
-            ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo,
-            ':fecha_lunes_count' => $lunes_str,
-            ':fecha_domingo_count' => $fecha_domingo
-        ];
-
-        $filtro_grupos = self::construirFiltroGrupos($params);
-
-        $sql = "SELECT p.id_personal,
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_cua
-         INNER JOIN tipos_servicio ts_cua ON a_cua.id_tipo_servicio = ts_cua.id_tipo_servicio
-         WHERE a_cua.id_personal = p.id_personal 
-         AND a_cua.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
-         AND ts_cua.nombre = 'CUARTELERO'
-        ) as veces_cuartelero_semana,
-        
-        COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
-        
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_dia
-         WHERE a_dia.id_personal = p.id_personal 
-         AND a_dia.fecha_servicio = :fecha_check
-        ) as servicios_ese_dia
-        
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-        WHERE p.tipo = 'TROPA'
-            AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            {$filtro_grupos}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-            )
-        ORDER BY 
-            servicios_ese_dia ASC,
-            veces_cuartelero_semana ASC,
-            dias_ultimo DESC,
-            g.orden ASC,
-            RAND()
-        LIMIT 1";
-
-        $resultado = self::fetchFirst($sql, $params);
-
-        if ($resultado) {
-            if ($resultado['servicios_ese_dia'] == 0) {
-                error_log("✅ CUARTELERO seleccionado SIN otros servicios: ID {$resultado['id_personal']}");
-            } else {
-                error_log("⚠️ CUARTELERO seleccionado CON {$resultado['servicios_ese_dia']} servicios ese día: ID {$resultado['id_personal']}");
-            }
-
-            return self::crearAsignacion(
-                $resultado['id_personal'],
-                'CUARTELERO',
-                $fecha,
-                '08:00:00',
-                '07:45:00',
-                $usuario_id,
-                $id_oficial
-            );
-        }
-
-        error_log("⚠️ NO se encontró CUARTELERO disponible para {$fecha}");
-        return null;
-    }
-
-    /**
-     * ✅ CORREGIDO: SERVICIO NOCTURNO con filtro de grupos
-     */
-    private static function asignarServicioNocturno($fecha, $usuario_id, $id_oficial = null)
-    {
-        $asignaciones = [];
-
-        $fecha_obj = new \DateTime($fecha);
-        $dia_semana = $fecha_obj->format('N');
-        $dias_desde_lunes = $dia_semana - 1;
-        $fecha_lunes = clone $fecha_obj;
-        $fecha_lunes->modify("-{$dias_desde_lunes} days");
-        $lunes_str = $fecha_lunes->format('Y-m-d');
-        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
-
-        error_log("🌙 === ASIGNANDO SERVICIO NOCTURNO ===");
-
-        $params = [
-            ':fecha' => $fecha,
-            ':fecha_actual' => $fecha,
-            ':fecha_hoy' => $fecha,
-            ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo,
-            ':fecha_lunes_count' => $lunes_str,
-            ':fecha_domingo_count' => $fecha_domingo,
-            ':fecha_lunes_count2' => $lunes_str,
-            ':fecha_domingo_count2' => $fecha_domingo,
-            ':fecha_cuartelero' => $fecha
-        ];
-
-        $filtro_grupos = self::construirFiltroGrupos($params);
-
-        $sql = "SELECT 
-        p.id_personal,
-        p.nombres,
-        p.apellidos,
-        g.nombre as grado,
-        
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_noc
-         INNER JOIN tipos_servicio ts_noc ON a_noc.id_tipo_servicio = ts_noc.id_tipo_servicio
-         WHERE a_noc.id_personal = p.id_personal 
-         AND a_noc.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
-         AND ts_noc.nombre = 'SERVICIO NOCTURNO'
-        ) as nocturnos_semana,
-        
-        (SELECT DATEDIFF(:fecha_actual, MAX(a_last.fecha_servicio))
-         FROM asignaciones_servicio a_last
-         INNER JOIN tipos_servicio ts_last ON a_last.id_tipo_servicio = ts_last.id_tipo_servicio
-         WHERE a_last.id_personal = p.id_personal
-         AND ts_last.nombre = 'SERVICIO NOCTURNO'
-        ) as dias_ultimo_nocturno,
-        
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_total
-         WHERE a_total.id_personal = p.id_personal 
-         AND a_total.fecha_servicio BETWEEN :fecha_lunes_count2 AND :fecha_domingo_count2
-        ) as servicios_semana_total,
-        
-        (SELECT GROUP_CONCAT(ts.nombre SEPARATOR ', ')
-         FROM asignaciones_servicio a_hoy
-         INNER JOIN tipos_servicio ts ON a_hoy.id_tipo_servicio = ts.id_tipo_servicio
-         WHERE a_hoy.id_personal = p.id_personal
-         AND a_hoy.fecha_servicio = :fecha_hoy
-        ) as servicios_hoy
-        
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        WHERE p.tipo = 'TROPA'
-            AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            {$filtro_grupos}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio = :fecha_cuartelero
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-            )
-        ORDER BY 
-            nocturnos_semana ASC,
-            COALESCE(dias_ultimo_nocturno, 999) DESC,
-            servicios_semana_total ASC,
-            g.orden ASC,
-            RAND()
-        LIMIT 3";
-
-        $soldados = self::fetchArray($sql, $params);
-
-        error_log("🌙 Soldados encontrados: " . count($soldados));
-
-        if (count($soldados) === 0) {
-            error_log("⚠️ NO SE ENCONTRARON SOLDADOS PARA NOCTURNO");
-            return [];
-        }
-
-        $horarios = [
-            1 => ['21:00:00', '23:30:00'],
-            2 => ['23:30:00', '02:00:00'],
-            3 => ['02:00:00', '04:45:00']
-        ];
-
-        $turno = 1;
-        foreach ($soldados as $sold) {
-            if (!empty($sold['servicios_hoy'])) {
-                error_log("⚡ DOBLE ASIGNACIÓN: {$sold['nombres']} {$sold['apellidos']} ya tiene: {$sold['servicios_hoy']}");
-            }
-
-            $asignacion = self::crearAsignacion(
-                $sold['id_personal'],
-                'SERVICIO NOCTURNO',
-                $fecha,
-                $horarios[$turno][0],
-                $horarios[$turno][1],
-                $usuario_id,
-                $id_oficial
-            );
-
-            if ($asignacion && !is_array($asignacion)) {
-                $asignaciones[] = $asignacion;
-                error_log("✅ NOCTURNO Turno {$turno}: {$sold['nombres']} {$sold['apellidos']}");
-            }
-
-            $turno++;
-        }
-
-        return $asignaciones;
-    }
-
-    /**
-     * ✅ RECONOCIMIENTO ya usa obtenerPersonalDisponible() que ya tiene el filtro
+     * ✅ COMPLETO: RECONOCIMIENTO con rangos de 10 días
      */
     private static function asignarReconocimiento($fecha, $usuario_id, $id_oficial = null)
     {
@@ -853,6 +575,16 @@ class AsignacionServicio extends ActiveRecord
             $logs[] = "⚠️ Solo hay {$especialistas_encontrados} especialistas, completando con SARGENTOS";
             $sargentos_necesarios = 2 - $especialistas_encontrados;
 
+            // Calcular rango del ciclo para sargentos
+            $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
+                                FROM asignaciones_servicio 
+                                WHERE fecha_servicio <= :fecha 
+                                AND DATEDIFF(:fecha, fecha_servicio) < 10";
+
+            $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
+            $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
+            $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
+
             $filtro_excluir = '';
             $params_excluir = [];
             if (!empty($ids_ya_asignados)) {
@@ -869,7 +601,9 @@ class AsignacionServicio extends ActiveRecord
                 ':fecha' => $fecha,
                 ':fecha2' => $fecha,
                 ':cantidad' => $sargentos_necesarios,
-                ':fecha_cuartelero' => $fecha
+                ':fecha_cuartelero' => $fecha,
+                ':fecha_inicio' => $fecha_inicio_ciclo,
+                ':fecha_fin' => $fecha_fin_ciclo
             ], $params_excluir);
 
             $filtro_grupos = self::construirFiltroGrupos($params_sargentos);
@@ -894,6 +628,11 @@ class AsignacionServicio extends ActiveRecord
                         SELECT id_personal FROM asignaciones_servicio 
                         WHERE fecha_servicio = :fecha_cuartelero
                         AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+                    )
+                    AND p.id_personal NOT IN (
+                        SELECT id_personal FROM asignaciones_servicio 
+                        WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+                        AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
                     )
                  ORDER BY g.orden ASC, RAND()
                  LIMIT :cantidad",
@@ -988,21 +727,333 @@ class AsignacionServicio extends ActiveRecord
         return $asignaciones;
     }
 
-    // ========================================
-    // RESTO DE FUNCIONES (sin cambios necesarios)
-    // ========================================
+    /**
+     * ✅ COMPLETO: BANDERÍN con rangos de 10 días
+     */
+    private static function asignarBanderin($fecha, $usuario_id, $id_oficial = null)
+    {
+        // Calcular rango del ciclo
+        $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
+                            FROM asignaciones_servicio 
+                            WHERE fecha_servicio <= :fecha 
+                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
 
+        $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
+        $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
+        $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
+
+        $params = [
+            ':fecha' => $fecha,
+            ':fecha2' => $fecha,
+            ':fecha3' => $fecha,
+            ':fecha_inicio' => $fecha_inicio_ciclo,
+            ':fecha_fin' => $fecha_fin_ciclo,
+            ':fecha_cuartelero' => $fecha
+        ];
+
+        $filtro_grupos = self::construirFiltroGrupos($params);
+
+        $sql = "SELECT p.id_personal
+        FROM bhr_personal p
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
+        WHERE p.tipo = 'TROPA'
+            AND g.nombre LIKE 'Sargento%'
+            AND p.activo = 1
+            AND cd.id_calendario IS NULL
+            {$filtro_grupos}
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio = :fecha_cuartelero
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+            )   
+        ORDER BY 
+            COALESCE(hr.dias_desde_ultimo, 999) DESC,
+            g.orden ASC,
+            RAND()
+        LIMIT 1";
+
+        $resultado = self::fetchFirst($sql, $params);
+
+        if ($resultado) {
+            return self::crearAsignacion(
+                $resultado['id_personal'],
+                'BANDERÍN',
+                $fecha,
+                '06:00:00',
+                '20:00:00',
+                $usuario_id,
+                $id_oficial
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * ✅ COMPLETO: CUARTELERO con rangos de 10 días
+     */
+    private static function asignarCuartelero($fecha, $usuario_id, $id_oficial = null)
+    {
+        // Calcular rango del ciclo
+        $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
+                            FROM asignaciones_servicio 
+                            WHERE fecha_servicio <= :fecha 
+                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
+
+        $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
+        $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
+        $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
+
+        $params = [
+            ':fecha' => $fecha,
+            ':fecha2' => $fecha,
+            ':fecha3' => $fecha,
+            ':fecha_check' => $fecha,
+            ':fecha_inicio' => $fecha_inicio_ciclo,
+            ':fecha_fin' => $fecha_fin_ciclo,
+            ':fecha_inicio_count' => $fecha_inicio_ciclo,
+            ':fecha_fin_count' => $fecha_fin_ciclo
+        ];
+
+        $filtro_grupos = self::construirFiltroGrupos($params);
+
+        $sql = "SELECT p.id_personal,
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_cua
+         INNER JOIN tipos_servicio ts_cua ON a_cua.id_tipo_servicio = ts_cua.id_tipo_servicio
+         WHERE a_cua.id_personal = p.id_personal 
+         AND a_cua.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
+         AND ts_cua.nombre = 'CUARTELERO'
+        ) as veces_cuartelero_ciclo,
+        
+        COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
+        
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_dia
+         WHERE a_dia.id_personal = p.id_personal 
+         AND a_dia.fecha_servicio = :fecha_check
+        ) as servicios_ese_dia
+        
+        FROM bhr_personal p
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+        WHERE p.tipo = 'TROPA'
+            AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
+            AND p.activo = 1
+            AND cd.id_calendario IS NULL
+            {$filtro_grupos}
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+            )
+        ORDER BY 
+            servicios_ese_dia ASC,
+            veces_cuartelero_ciclo ASC,
+            dias_ultimo DESC,
+            g.orden ASC,
+            RAND()
+        LIMIT 1";
+
+        $resultado = self::fetchFirst($sql, $params);
+
+        if ($resultado) {
+            if ($resultado['servicios_ese_dia'] == 0) {
+                error_log("✅ CUARTELERO seleccionado SIN otros servicios: ID {$resultado['id_personal']}");
+            } else {
+                error_log("⚠️ CUARTELERO seleccionado CON {$resultado['servicios_ese_dia']} servicios ese día: ID {$resultado['id_personal']}");
+            }
+
+            return self::crearAsignacion(
+                $resultado['id_personal'],
+                'CUARTELERO',
+                $fecha,
+                '08:00:00',
+                '07:45:00',
+                $usuario_id,
+                $id_oficial
+            );
+        }
+
+        error_log("⚠️ NO se encontró CUARTELERO disponible para {$fecha}");
+        return null;
+    }
+
+    /**
+     * ✅ COMPLETO: SERVICIO NOCTURNO con rangos de 10 días
+     */
+    private static function asignarServicioNocturno($fecha, $usuario_id, $id_oficial = null)
+    {
+        $asignaciones = [];
+
+        // Calcular rango del ciclo
+        $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
+                            FROM asignaciones_servicio 
+                            WHERE fecha_servicio <= :fecha 
+                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
+
+        $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
+        $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
+        $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
+
+        error_log("🌙 === ASIGNANDO SERVICIO NOCTURNO ===");
+
+        $params = [
+            ':fecha' => $fecha,
+            ':fecha_actual' => $fecha,
+            ':fecha_hoy' => $fecha,
+            ':fecha_inicio' => $fecha_inicio_ciclo,
+            ':fecha_fin' => $fecha_fin_ciclo,
+            ':fecha_inicio_count' => $fecha_inicio_ciclo,
+            ':fecha_fin_count' => $fecha_fin_ciclo,
+            ':fecha_inicio_count2' => $fecha_inicio_ciclo,
+            ':fecha_fin_count2' => $fecha_fin_ciclo,
+            ':fecha_cuartelero' => $fecha
+        ];
+
+        $filtro_grupos = self::construirFiltroGrupos($params);
+
+        $sql = "SELECT 
+        p.id_personal,
+        p.nombres,
+        p.apellidos,
+        g.nombre as grado,
+        
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_noc
+         INNER JOIN tipos_servicio ts_noc ON a_noc.id_tipo_servicio = ts_noc.id_tipo_servicio
+         WHERE a_noc.id_personal = p.id_personal 
+         AND a_noc.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
+         AND ts_noc.nombre = 'SERVICIO NOCTURNO'
+        ) as nocturnos_ciclo,
+        
+        (SELECT DATEDIFF(:fecha_actual, MAX(a_last.fecha_servicio))
+         FROM asignaciones_servicio a_last
+         INNER JOIN tipos_servicio ts_last ON a_last.id_tipo_servicio = ts_last.id_tipo_servicio
+         WHERE a_last.id_personal = p.id_personal
+         AND ts_last.nombre = 'SERVICIO NOCTURNO'
+        ) as dias_ultimo_nocturno,
+        
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_total
+         WHERE a_total.id_personal = p.id_personal 
+         AND a_total.fecha_servicio BETWEEN :fecha_inicio_count2 AND :fecha_fin_count2
+        ) as servicios_ciclo_total,
+        
+        (SELECT GROUP_CONCAT(ts.nombre SEPARATOR ', ')
+         FROM asignaciones_servicio a_hoy
+         INNER JOIN tipos_servicio ts ON a_hoy.id_tipo_servicio = ts.id_tipo_servicio
+         WHERE a_hoy.id_personal = p.id_personal
+         AND a_hoy.fecha_servicio = :fecha_hoy
+        ) as servicios_hoy
+        
+        FROM bhr_personal p
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+        WHERE p.tipo = 'TROPA'
+            AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
+            AND p.activo = 1
+            AND cd.id_calendario IS NULL
+            {$filtro_grupos}
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+            )
+            AND p.id_personal NOT IN (
+                SELECT id_personal FROM asignaciones_servicio 
+                WHERE fecha_servicio = :fecha_cuartelero
+                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+            )
+        ORDER BY 
+            nocturnos_ciclo ASC,
+            COALESCE(dias_ultimo_nocturno, 999) DESC,
+            servicios_ciclo_total ASC,
+            g.orden ASC,
+            RAND()
+        LIMIT 3";
+
+        $soldados = self::fetchArray($sql, $params);
+
+        error_log("🌙 Soldados encontrados: " . count($soldados));
+
+        if (count($soldados) === 0) {
+            error_log("⚠️ NO SE ENCONTRARON SOLDADOS PARA NOCTURNO");
+            return [];
+        }
+
+        $horarios = [
+            1 => ['21:00:00', '23:30:00'],
+            2 => ['23:30:00', '02:00:00'],
+            3 => ['02:00:00', '04:45:00']
+        ];
+
+        $turno = 1;
+        foreach ($soldados as $sold) {
+            if (!empty($sold['servicios_hoy'])) {
+                error_log("⚡ DOBLE ASIGNACIÓN: {$sold['nombres']} {$sold['apellidos']} ya tiene: {$sold['servicios_hoy']}");
+            }
+
+            $asignacion = self::crearAsignacion(
+                $sold['id_personal'],
+                'SERVICIO NOCTURNO',
+                $fecha,
+                $horarios[$turno][0],
+                $horarios[$turno][1],
+                $usuario_id,
+                $id_oficial
+            );
+
+            if ($asignacion && !is_array($asignacion)) {
+                $asignaciones[] = $asignacion;
+                error_log("✅ NOCTURNO Turno {$turno}: {$sold['nombres']} {$sold['apellidos']}");
+            }
+
+            $turno++;
+        }
+
+        return $asignaciones;
+    }
+
+    /**
+     * ✅ COMPLETO: obtenerPersonalDisponible con rangos de 10 días
+     */
     private static function obtenerPersonalDisponible($fecha, $tipo, $cantidad, $nombre_servicio, $fecha_exclusion = null, $incluir_grados = null, $modo_emergencia = false, $excluir_ids = [])
     {
         error_log("📋 Buscando personal: tipo={$tipo}, servicio={$nombre_servicio}, cantidad={$cantidad}");
 
-        $fecha_obj = new \DateTime($fecha);
-        $dia_semana = $fecha_obj->format('N');
-        $dias_desde_lunes = $dia_semana - 1;
-        $fecha_lunes = clone $fecha_obj;
-        $fecha_lunes->modify("-{$dias_desde_lunes} days");
-        $lunes_str = $fecha_lunes->format('Y-m-d');
-        $fecha_domingo = date('Y-m-d', strtotime($lunes_str . ' +6 days'));
+        // Calcular rango del ciclo
+        $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
+                            FROM asignaciones_servicio 
+                            WHERE fecha_servicio <= :fecha_temp 
+                            AND DATEDIFF(:fecha_temp, fecha_servicio) < 10";
+
+        $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha_temp' => $fecha]);
+        $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
+        $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
 
         // Construir filtro de grados
         $filtro_grados = '';
@@ -1048,15 +1099,15 @@ class AsignacionServicio extends ActiveRecord
             ':servicio2' => $nombre_servicio,
             ':servicio3' => $nombre_servicio,
             ':cantidad' => (int)$cantidad,
-            ':fecha_lunes' => $lunes_str,
-            ':fecha_domingo' => $fecha_domingo,
-            ':fecha_lunes_count' => $lunes_str,
-            ':fecha_domingo_count' => $fecha_domingo,
-            ':fecha_lunes_count2' => $lunes_str,
-            ':fecha_domingo_count2' => $fecha_domingo
+            ':fecha_inicio' => $fecha_inicio_ciclo,
+            ':fecha_fin' => $fecha_fin_ciclo,
+            ':fecha_inicio_count' => $fecha_inicio_ciclo,
+            ':fecha_fin_count' => $fecha_fin_ciclo,
+            ':fecha_inicio_count2' => $fecha_inicio_ciclo,
+            ':fecha_fin_count2' => $fecha_fin_ciclo
         ];
 
-        // ✨ Construir filtro de grupos
+        // Construir filtro de grupos
         $filtro_grupos = self::construirFiltroGrupos($params);
 
         // Merge de parámetros
@@ -1074,14 +1125,14 @@ class AsignacionServicio extends ActiveRecord
             (SELECT COUNT(*) 
              FROM asignaciones_servicio a_count 
              WHERE a_count.id_personal = p.id_personal 
-             AND a_count.fecha_servicio BETWEEN :fecha_lunes_count AND :fecha_domingo_count
-            ) as servicios_semana_total,
+             AND a_count.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
+            ) as servicios_ciclo_total,
             
             (SELECT COUNT(*) 
              FROM asignaciones_servicio a_count2
              INNER JOIN tipos_servicio ts_count ON a_count2.id_tipo_servicio = ts_count.id_tipo_servicio
              WHERE a_count2.id_personal = p.id_personal 
-             AND a_count2.fecha_servicio BETWEEN :fecha_lunes_count2 AND :fecha_domingo_count2
+             AND a_count2.fecha_servicio BETWEEN :fecha_inicio_count2 AND :fecha_fin_count2
              AND ts_count.nombre = :servicio3
             ) as veces_este_servicio,
             
@@ -1106,12 +1157,12 @@ class AsignacionServicio extends ActiveRecord
             {$filtro_excluir_ids}
             AND p.id_personal NOT IN (
                 SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_lunes AND :fecha_domingo
+                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
                 AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
             )
             {$exclusion_sql}
         ORDER BY 
-            servicios_semana_total ASC,
+            servicios_ciclo_total ASC,
             veces_este_servicio ASC,
             dias_ultimo DESC,
             prioridad_hist ASC,
@@ -1153,6 +1204,10 @@ class AsignacionServicio extends ActiveRecord
 
         return $personal;
     }
+
+    // ========================================
+    // FUNCIONES AUXILIARES
+    // ========================================
 
     private static function crearAsignacion($id_personal, $nombre_servicio, $fecha, $hora_inicio, $hora_fin, $usuario_id, $id_oficial = null)
     {
@@ -1289,9 +1344,12 @@ class AsignacionServicio extends ActiveRecord
         return $resultado;
     }
 
+    /**
+     * ✅ MODIFICADO: obtenerAsignacionesSemana ahora maneja ciclos de 10 días
+     */
     public static function obtenerAsignacionesSemana($fecha_inicio)
     {
-        $fecha_fin = date('Y-m-d', strtotime($fecha_inicio . ' +6 days'));
+        $fecha_fin = date('Y-m-d', strtotime($fecha_inicio . ' +9 days'));
 
         $sql = "SELECT 
             a.*,
@@ -1317,12 +1375,15 @@ class AsignacionServicio extends ActiveRecord
         ]);
     }
 
+    /**
+     * ✅ MODIFICADO: eliminarAsignacionesSemana ahora maneja ciclos de 10 días
+     */
     public static function eliminarAsignacionesSemana($fecha_inicio)
     {
         try {
-            $fecha_fin = date('Y-m-d', strtotime($fecha_inicio . ' +6 days'));
+            $fecha_fin = date('Y-m-d', strtotime($fecha_inicio . ' +9 days'));
 
-            error_log("🗑️ === ELIMINANDO SEMANA: {$fecha_inicio} a {$fecha_fin} ===");
+            error_log("🗑️ === ELIMINANDO CICLO: {$fecha_inicio} a {$fecha_fin} ===");
 
             $personal_afectado = self::fetchArray(
                 "SELECT DISTINCT id_personal 
