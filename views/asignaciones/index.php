@@ -73,7 +73,8 @@
         background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
     }
 
-    .service-card.nocturno {
+    .service-card.nocturno,
+    .service-card.servicionocturno {
         background: linear-gradient(135deg, #1a472a 0%, #2d5f3d 100%);
     }
 
@@ -211,7 +212,7 @@
         height: 4rem;
     }
 
-    /* ✨ NUEVOS ESTILOS PARA BOTONES */
+    /* ✨ BOTONES */
     .btn-generate {
         background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
         border: none;
@@ -229,7 +230,6 @@
         background: linear-gradient(135deg, #3d6b1f 0%, #4a8025 100%);
     }
 
-    /* ✨ BOTÓN CONSULTAR - Azul llamativo */
     .btn-consult {
         background: linear-gradient(135deg, #4c84ff 0%, #667eea 100%);
         border: none;
@@ -247,7 +247,7 @@
         background: linear-gradient(135deg, #667eea 0%, #4c84ff 100%);
     }
 
-    .btn-delete-week {
+    .btn-delete-cycle {
         background: linear-gradient(135deg, #804d00ff 0%, #ff0f0fff 100%);
         border: none;
         color: white;
@@ -258,12 +258,11 @@
         box-shadow: 0 4px 15px rgba(214, 52, 71, 0.3);
     }
 
-    .btn-delete-week:hover {
+    .btn-delete-cycle:hover {
         transform: translateY(-2px);
         box-shadow: 0 6px 20px rgba(183, 21, 64, 0.4);
     }
 
-    /* ✨ BOTÓN EXPORTAR PDF - Naranja llamativo */
     .btn-export-pdf {
         background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%);
         border: none;
@@ -280,7 +279,6 @@
         box-shadow: 0 6px 20px rgba(201, 42, 42, 0.4);
     }
 
-    /* ✨ BOTÓN REGRESAR - Gris elegante */
     .btn-back {
         background: linear-gradient(135deg, #868f96 0%, #596164 100%);
         border: none;
@@ -314,8 +312,8 @@
     <!-- Header -->
     <div class="page-header">
         <h1>
-            <i class="bi bi-calendar-week"></i>
-            Generador de Servicios Semanales
+            <i class="bi bi-calendar-range"></i>
+            Generador de Servicios (Ciclos de 10 Días)
         </h1>
     </div>
 
@@ -326,40 +324,40 @@
                 <div class="week-selector">
                     <div class="flex-grow-1">
                         <label for="fechaInicio" class="form-label fw-bold">
-                            <i class="bi bi-calendar-event"></i> Seleccionar Semana (Lunes)
+                            <i class="bi bi-calendar-event"></i> Seleccionar Fecha de Inicio del Ciclo
                         </label>
                         <input
                             type="date"
                             id="fechaInicio"
                             class="form-control form-control-lg"
-                            placeholder="Seleccione un lunes">
+                            placeholder="Seleccione cualquier día">
                         <small class="text-muted">
                             <i class="bi bi-info-circle"></i>
-                            <strong>Por favor, seleccione un día LUNES</strong> para iniciar la semana
+                            <strong>Puede seleccionar cualquier día</strong> - El sistema generará un ciclo de 10 días consecutivos
                         </small>
                     </div>
                     <div class="d-flex gap-2 align-items-end">
                         <!-- ✨ Botón Generar -->
                         <button id="btnGenerar" class="btn btn-generate" style="display: none;">
-                            <i class="bi bi-lightning-charge-fill"></i> Generar Servicios
+                            <i class="bi bi-lightning-charge-fill"></i> Generar Ciclo
                         </button>
 
-                        <!-- ✨ Botón Consultar - con nueva clase -->
+                        <!-- ✨ Botón Consultar -->
                         <button id="btnConsultar" class="btn btn-consult" style="display: none;">
                             <i class="bi bi-search"></i> Consultar
                         </button>
 
-                        <!-- ✨ Botón Eliminar -->
-                        <button id="btnEliminarSemana" class="btn btn-delete-week" style="display: none;">
-                            <i class="bi bi-trash"></i> Eliminar Semana
+                        <!-- ✨ Botón Eliminar Ciclo -->
+                        <button id="btnEliminarCiclo" class="btn btn-delete-cycle" style="display: none;">
+                            <i class="bi bi-trash"></i> Eliminar Ciclo
                         </button>
 
-                        <!-- ✨ Botón Exportar PDF - mejorado -->
+                        <!-- ✨ Botón Exportar PDF -->
                         <button id="btnExportarPDF" class="btn btn-export-pdf" style="display: none;">
                             <i class="bi bi-file-pdf-fill"></i> Exportar PDF
                         </button>
 
-                        <!-- ✨ NUEVO: Botón Regresar -->
+                        <!-- ✨ Botón Regresar -->
                         <button id="btnRegresar" class="btn btn-back" style="display: none;">
                             <i class="bi bi-arrow-left-circle"></i> Regresar
                         </button>
@@ -373,18 +371,18 @@
     <div id="contenedorResultados">
         <div class="empty-state">
             <i class="bi bi-calendar-check"></i>
-            <h3>Selecciona una semana</h3>
-            <p>Elige un lunes y genera los servicios para visualizarlos aquí</p>
+            <h3>Selecciona una fecha de inicio</h3>
+            <p>Elige cualquier día y genera un ciclo de 10 días de servicios</p>
         </div>
     </div>
 
-    <!-- ✨ MODAL COMPLETO CON BOTONES TOGGLE Y PRESETS DE ROTACIÓN -->
+    <!-- ✨ MODAL DE SELECCIÓN DE GRUPOS -->
     <div class="modal fade" id="modalSeleccionGrupos" tabindex="-1" aria-labelledby="modalSeleccionGruposLabel" aria-hidden="true">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header" style="background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%); color: white;">
                     <h5 class="modal-title" id="modalSeleccionGruposLabel">
-                        <i class="bi bi-calendar-week"></i> Seleccionar Grupos Disponibles
+                        <i class="bi bi-calendar-range"></i> Seleccionar Grupos Disponibles
                     </h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
@@ -393,7 +391,7 @@
                     <!-- Fecha seleccionada -->
                     <div class="alert alert-info">
                         <i class="bi bi-info-circle"></i>
-                        <strong>Semana a generar:</strong> <span id="fechaSemanaModal">-</span>
+                        <strong>Ciclo a generar (10 días):</strong> <span id="fechaCicloModal">-</span>
                     </div>
 
                     <!-- ✨ PRESETS DE ROTACIÓN RÁPIDA -->
@@ -421,7 +419,7 @@
                     <!-- Instrucciones -->
                     <div class="alert alert-warning">
                         <i class="bi bi-exclamation-triangle"></i>
-                        <strong>Importante:</strong> Selecciona los grupos que estarán <strong>DISPONIBLES</strong> para servicios.
+                        <strong>Importante:</strong> Selecciona los grupos que estarán <strong>DISPONIBLES</strong> para servicios durante los 10 días.
                         Los grupos desmarcados estarán de descanso.
                     </div>
 
@@ -497,7 +495,7 @@
                         <i class="bi bi-x-circle"></i> Cancelar
                     </button>
                     <button type="button" class="btn btn-generate" id="btnConfirmarGeneracion">
-                        <i class="bi bi-lightning-charge-fill"></i> Generar Servicios
+                        <i class="bi bi-lightning-charge-fill"></i> Generar Ciclo
                     </button>
                 </div>
             </div>
@@ -564,8 +562,9 @@
 <div id="loadingOverlay" class="loading-overlay">
     <div class="loading-spinner">
         <div class="spinner-border text-light" role="status"></div>
-        <h4 class="mt-3">Generando servicios...</h4>
-        <p>Por favor espere</p>
+        <h4 class="mt-3">Generando servicios del ciclo...</h4>
+        <p>Por favor espere, esto puede tomar unos momentos</p>
+        <small class="text-muted">Generando 10 días de asignaciones</small>
     </div>
 </div>
 

@@ -8,7 +8,7 @@ import * as bootstrap from 'bootstrap';
 const fechaInicio = document.getElementById('fechaInicio');
 const btnGenerar = document.getElementById('btnGenerar');
 const btnConsultar = document.getElementById('btnConsultar');
-const btnEliminarSemana = document.getElementById('btnEliminarSemana');
+const btnEliminarCiclo = document.getElementById('btnEliminarCiclo');
 const btnExportarPDF = document.getElementById('btnExportarPDF');
 const btnRegresar = document.getElementById('btnRegresar');
 const contenedorResultados = document.getElementById('contenedorResultados');
@@ -17,7 +17,7 @@ const loadingOverlay = document.getElementById('loadingOverlay');
 // Referencias al modal de grupos
 const modalSeleccionGrupos = new bootstrap.Modal(document.getElementById('modalSeleccionGrupos'));
 const btnConfirmarGeneracion = document.getElementById('btnConfirmarGeneracion');
-const fechaSemanaModal = document.getElementById('fechaSemanaModal');
+const fechaCicloModal = document.getElementById('fechaCicloModal');
 
 // Estado de la vista
 let estadoVista = 'seleccion';
@@ -112,11 +112,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // FUNCIONES BÁSICAS
 // ========================================
 
-const validarLunes = (fecha) => {
-    const date = new Date(fecha + 'T00:00:00');
-    return date.getDay() === 1;
-};
-
 const mostrarLoading = (mostrar) => {
     loadingOverlay.style.display = mostrar ? 'flex' : 'none';
 };
@@ -124,16 +119,16 @@ const mostrarLoading = (mostrar) => {
 const gestionarBotones = (contexto) => {
     btnGenerar.style.display = 'none';
     btnConsultar.style.display = 'none';
-    btnEliminarSemana.style.display = 'none';
+    btnEliminarCiclo.style.display = 'none';
     btnExportarPDF.style.display = 'none';
     btnRegresar.style.display = 'none';
 
     switch (contexto) {
-        case 'semana_existente':
+        case 'ciclo_existente':
             btnConsultar.style.display = '';
             estadoVista = 'seleccion';
             break;
-        case 'semana_nueva':
+        case 'ciclo_nuevo':
             btnGenerar.style.display = '';
             estadoVista = 'seleccion';
             break;
@@ -144,7 +139,7 @@ const gestionarBotones = (contexto) => {
             break;
         case 'generado_nuevo':
             btnExportarPDF.style.display = '';
-            btnEliminarSemana.style.display = '';
+            btnEliminarCiclo.style.display = '';
             btnRegresar.style.display = '';
             estadoVista = 'generando';
             break;
@@ -154,14 +149,14 @@ const gestionarBotones = (contexto) => {
     }
 };
 
-const verificarSemanaExistente = async (fecha) => {
+const verificarCicloExistente = async (fecha) => {
     try {
         const url = `/TERCERA_CIA/API/asignaciones/obtener?fecha_inicio=${fecha}`;
         const respuesta = await fetch(url);
         const data = await respuesta.json();
         return data.codigo === 1 && data.datos && data.datos.length > 0;
     } catch (error) {
-        console.error('Error al verificar semana:', error);
+        console.error('Error al verificar ciclo:', error);
         return false;
     }
 };
@@ -174,26 +169,14 @@ const manejarCambioFecha = async () => {
         return;
     }
 
-    if (!validarLunes(fecha)) {
-        Swal.fire({
-            icon: 'error',
-            title: 'Día inválido',
-            text: 'Debe seleccionar un día LUNES',
-            confirmButtonText: 'Entendido'
-        });
-        fechaInicio.value = '';
-        gestionarBotones('inicial');
-        return;
-    }
-
     mostrarLoading(true);
-    const existe = await verificarSemanaExistente(fecha);
+    const existe = await verificarCicloExistente(fecha);
     mostrarLoading(false);
 
     if (existe) {
-        gestionarBotones('semana_existente');
+        gestionarBotones('ciclo_existente');
     } else {
-        gestionarBotones('semana_nueva');
+        gestionarBotones('ciclo_nuevo');
     }
 
     if (estadoVista === 'seleccion') {
@@ -201,7 +184,7 @@ const manejarCambioFecha = async () => {
             <div class="empty-state">
                 <i class="bi bi-calendar-check"></i>
                 <h3>Selecciona una acción</h3>
-                <p>${existe ? 'Esta semana ya tiene servicios generados' : 'Genera los servicios para esta semana'}</p>
+                <p>${existe ? 'Este ciclo ya tiene servicios generados' : 'Genera los servicios para este ciclo de 10 días'}</p>
             </div>
         `;
     }
@@ -211,8 +194,8 @@ const regresarASeleccion = () => {
     contenedorResultados.innerHTML = `
         <div class="empty-state">
             <i class="bi bi-calendar-check"></i>
-            <h3>Selecciona una semana</h3>
-            <p>Elige un lunes y genera o consulta los servicios</p>
+            <h3>Selecciona una fecha de inicio</h3>
+            <p>Elige cualquier día y genera o consulta los servicios del ciclo de 10 días</p>
         </div>
     `;
     manejarCambioFecha();
@@ -294,22 +277,12 @@ btnGenerar.addEventListener('click', (e) => {
         Swal.fire({
             icon: 'warning',
             title: 'Fecha requerida',
-            text: 'Debe seleccionar una fecha de inicio'
+            text: 'Debe seleccionar una fecha de inicio para el ciclo de 10 días'
         });
         return;
     }
 
-    if (!validarLunes(fecha)) {
-        Swal.fire({
-            icon: 'error',
-            title: 'Día inválido',
-            text: 'Debe seleccionar un día LUNES',
-            confirmButtonText: 'Entendido'
-        });
-        return;
-    }
-
-    fechaSemanaModal.textContent = formatearFecha(fecha);
+    fechaCicloModal.textContent = formatearRangoCiclo(fecha);
     modalSeleccionGrupos.show();
     actualizarConteoPersonal();
 });
@@ -333,13 +306,17 @@ btnConfirmarGeneracion.addEventListener('click', async () => {
         icon: 'question',
         title: '¿Generar servicios?',
         html: `
-            <p>Se generarán los servicios para la semana del:</p>
-            <p><strong>${formatearFecha(fecha)}</strong></p>
+            <p>Se generarán los servicios para el ciclo de:</p>
+            <p><strong>${formatearRangoCiclo(fecha)}</strong></p>
             <p><strong>${gruposSeleccionados.length} grupos seleccionados</strong></p>
+            <p style="color: #ff9966; font-weight: 600; margin-top: 1rem;">
+                <i class="bi bi-calendar-range"></i> 
+                Total: 10 días de servicios
+            </p>
             <hr style="margin: 1.5rem 0; border-top: 2px solid #e2e8f0;">
             <p style="color: #ff6b6b; font-weight: 600; margin-top: 1rem;">
                 <i class="bi bi-exclamation-triangle-fill"></i> 
-                Recuerde que el personal que está en otra comision que no sea Descanso, debe ser desactivado desde el panel de Gestión de Personal antes de generar los servicios.
+                Recuerde que el personal que está en otra comisión que no sea Descanso, debe ser desactivado desde el panel de Gestión de Personal antes de generar los servicios.
             </p>
         `,
         showCancelButton: true,
@@ -449,16 +426,7 @@ const consultarServicios = async () => {
         Swal.fire({
             icon: 'warning',
             title: 'Fecha requerida',
-            text: 'Debe seleccionar una fecha de inicio'
-        });
-        return;
-    }
-
-    if (!validarLunes(fecha)) {
-        Swal.fire({
-            icon: 'error',
-            title: 'Día inválido',
-            text: 'Debe seleccionar un día LUNES'
+            text: 'Debe seleccionar una fecha de inicio para el ciclo'
         });
         return;
     }
@@ -480,7 +448,7 @@ const consultarServicios = async () => {
                 <div class="empty-state">
                     <i class="bi bi-inbox"></i>
                     <h3>No hay servicios generados</h3>
-                    <p>No se encontraron asignaciones para esta semana</p>
+                    <p>No se encontraron asignaciones para este ciclo</p>
                 </div>
             `;
             gestionarBotones('inicial');
@@ -519,7 +487,7 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
             <div class="empty-state">
                 <i class="bi bi-inbox"></i>
                 <h3>No hay servicios</h3>
-                <p>No se encontraron asignaciones para esta semana</p>
+                <p>No se encontraron asignaciones para este ciclo</p>
             </div>
         `;
         return;
@@ -550,13 +518,15 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
     let html = '';
 
     if (serviciosSemana.length > 0) {
+        const fechaFin = calcularFechaFin(fechaInicio, 9);
+
         html += `
             <div class="row mb-4">
                 <div class="col-12">
                     <div class="week-service-card">
                         <h3 class="week-title">
                             <i class="bi bi-calendar-range"></i>
-                            Servicio Semanal (${formatearFecha(fechaInicio)} - ${formatearFecha(serviciosSemana[0].fecha_servicio)})
+                            Servicio Semanal (${formatearFecha(fechaInicio)} - ${formatearFecha(fechaFin)})
                         </h3>
         `;
 
@@ -570,7 +540,7 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                 <div class="semana-card">
                     <div class="semana-header">
                         <h4><i class="bi bi-shield-fill"></i> Semana</h4>
-                        <span class="badge bg-warning text-dark">7 días completos</span>
+                        <span class="badge bg-warning text-dark">10 días completos</span>
                     </div>
                     <div class="semana-content">
                         <div class="personnel-item-semana">
@@ -578,7 +548,7 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                                 <strong>${gradoCompleto}</strong> ${s.nombre_completo}
                             </div>
                             <div class="text-muted">
-                                <i class="bi bi-clock"></i> Toda la semana
+                                <i class="bi bi-clock"></i> Todo el ciclo (10 días)
                             </div>
                         </div>
                     </div>
@@ -713,16 +683,16 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
 };
 
 // ========================================
-// ELIMINAR SEMANA
+// ELIMINAR CICLO
 // ========================================
 
-const eliminarSemana = async () => {
+const eliminarCiclo = async () => {
     const fecha = fechaInicio.value;
 
     const confirmacion = await Swal.fire({
         icon: 'warning',
-        title: '¿Eliminar semana completa?',
-        html: `Se eliminarán TODOS los servicios de la semana del:<br><strong>${formatearFecha(fecha)}</strong>`,
+        title: '¿Eliminar ciclo completo?',
+        html: `Se eliminarán TODOS los servicios del ciclo de 10 días que inicia:<br><strong>${formatearFecha(fecha)}</strong><br><br><small>Esto incluye todos los días del ciclo</small>`,
         showCancelButton: true,
         confirmButtonText: 'Sí, eliminar',
         cancelButtonText: 'Cancelar',
@@ -794,14 +764,23 @@ const exportarPDF = () => {
     const fechaSeleccionada = fechaInicio.value;
 
     if (!fechaSeleccionada) {
-        Swal.fire('Error', 'Debes seleccionar una fecha', 'error');
+        Swal.fire('Error', 'Debes seleccionar una fecha de inicio', 'error');
         return;
     }
 
     window.open(`/TERCERA_CIA/asignaciones/exportar-pdf?fecha=${fechaSeleccionada}`, '_blank');
 };
 
-// Formatear fecha a español
+// ========================================
+// FUNCIONES AUXILIARES DE FECHAS
+// ========================================
+
+const calcularFechaFin = (fechaInicio, dias) => {
+    const fecha = new Date(fechaInicio + 'T00:00:00');
+    fecha.setDate(fecha.getDate() + dias);
+    return fecha.toISOString().split('T')[0];
+};
+
 const formatearFecha = (fecha) => {
     const date = new Date(fecha + 'T00:00:00');
     const opciones = {
@@ -813,12 +792,17 @@ const formatearFecha = (fecha) => {
     return date.toLocaleDateString('es-ES', opciones);
 };
 
+const formatearRangoCiclo = (fechaInicio) => {
+    const fechaFin = calcularFechaFin(fechaInicio, 9);
+    return `${formatearFecha(fechaInicio)} - ${formatearFecha(fechaFin)}`;
+};
+
 // ========================================
 // EVENT LISTENERS
 // ========================================
 
 btnConsultar.addEventListener('click', consultarServicios);
-btnEliminarSemana.addEventListener('click', eliminarSemana);
+btnEliminarCiclo.addEventListener('click', eliminarCiclo);
 btnExportarPDF.addEventListener('click', exportarPDF);
 btnRegresar.addEventListener('click', regresarASeleccion);
 fechaInicio.addEventListener('change', manejarCambioFecha);

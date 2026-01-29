@@ -572,9 +572,9 @@ class AsignacionController
         });
 
         // ✅ GENERAR 2 TABLAS DE 5 DÍAS CADA UNA
-        $html .= self::generarTablaRango($personal_servicios, 1, 5, "DÍAS 1-5");
+        $html .= self::generarTablaRango($personal_servicios, 1, 5, "DÍAS 1-5", $fecha_inicio);
         $html .= '<div style="height: 30px;"></div>'; // Separador
-        $html .= self::generarTablaRango($personal_servicios, 6, 10, "DÍAS 6-10");
+        $html .= self::generarTablaRango($personal_servicios, 6, 10, "DÍAS 6-10", $fecha_inicio);
 
         // Leyenda
         $html .= '
@@ -602,9 +602,9 @@ class AsignacionController
     }
 
     /**
-     * ✅ NUEVA FUNCIÓN: Genera una tabla para un rango de días específico
+     * ✅ MODIFICADO: Genera una tabla para un rango de días específico CON NOMBRES DE DÍAS
      */
-    private static function generarTablaRango($personal_servicios, $dia_inicio, $dia_fin, $titulo)
+    private static function generarTablaRango($personal_servicios, $dia_inicio, $dia_fin, $titulo, $fecha_inicio)
     {
         $html = '
     <div style="page-break-inside: avoid;">
@@ -614,9 +614,15 @@ class AsignacionController
                 <tr style="background: #2d5016; color: white;">
                     <th style="border: 1px solid #ddd; padding: 8px; text-align: left; width: 23%;">NOMBRE</th>';
 
-        // Headers de días
+        // ✨ MODIFICACIÓN: Headers con día de la semana + fecha
         for ($dia = $dia_inicio; $dia <= $dia_fin; $dia++) {
-            $html .= '<th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 12%;">DÍA ' . $dia . '</th>';
+            $fecha_dia = new \DateTime($fecha_inicio);
+            $fecha_dia->modify('+' . ($dia - 1) . ' days');
+
+            $dia_semana = self::getNombreDiaCorto($fecha_dia->format('N'));
+            $dia_numero = $fecha_dia->format('d');
+
+            $html .= '<th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 12%; font-size: 8px;">' . strtoupper($dia_semana) . ' ' . $dia_numero . '</th>';
         }
 
         $html .= '
@@ -747,6 +753,15 @@ class AsignacionController
     }
 
     private static function getNombreDia($num)
+    {
+        $dias = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+        return $dias[$num];
+    }
+
+    /**
+     * ✨ NUEVA FUNCIÓN: Obtiene nombre corto del día
+     */
+    private static function getNombreDiaCorto($num)
     {
         $dias = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
         return $dias[$num];
