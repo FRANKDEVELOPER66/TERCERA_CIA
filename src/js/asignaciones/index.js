@@ -5,22 +5,28 @@ import DataTable from "datatables.net-bs5";
 import { lenguaje } from "../lenguaje";
 import * as bootstrap from 'bootstrap';
 
+// ========================================
+// ✅ REFERENCIAS A ELEMENTOS HTML (con validación)
+// ========================================
 const fechaInicio = document.getElementById('fechaInicio');
 const btnGenerar = document.getElementById('btnGenerar');
 const btnConsultar = document.getElementById('btnConsultar');
-const btnEliminarCiclo = document.getElementById('btnEliminarCiclo');
+const btnEliminarSemana = document.getElementById('btnEliminarCiclo'); // ← Cambiado a btnEliminarCiclo
 const btnExportarPDF = document.getElementById('btnExportarPDF');
 const btnRegresar = document.getElementById('btnRegresar');
 const contenedorResultados = document.getElementById('contenedorResultados');
 const loadingOverlay = document.getElementById('loadingOverlay');
+const infoFecha = document.getElementById('infoFecha');
 
-// Referencias al modal de grupos
-const modalSeleccionGrupos = new bootstrap.Modal(document.getElementById('modalSeleccionGrupos'));
+// Referencias al modal de grupos (con validación)
+const modalElement = document.getElementById('modalSeleccionGrupos');
+const modalSeleccionGrupos = modalElement ? new bootstrap.Modal(modalElement) : null;
 const btnConfirmarGeneracion = document.getElementById('btnConfirmarGeneracion');
-const fechaCicloModal = document.getElementById('fechaCicloModal');
+const fechaSemanaModal = document.getElementById('fechaCicloModal'); // ← Cambiado a fechaCicloModal
 
 // Estado de la vista
 let estadoVista = 'seleccion';
+let fechaActualInfo = null;
 
 // ========================================
 // ✨ FUNCIONES DE PRESETS DE ROTACIÓN
@@ -31,13 +37,11 @@ const aplicarPreset = (tipo) => {
 
     switch (tipo) {
         case 'todos':
-            // Marcar todos los grupos
             botones.forEach(btn => btn.classList.add('active'));
             break;
 
         case 'rotacion_a':
             // Solo B y C disponibles (A descansa)
-            // Grupos A: 1 (Ofc), 4 (Esp), 7 (Trp)
             botones.forEach(btn => {
                 const grupo = parseInt(btn.dataset.grupo);
                 if ([1, 4, 7].includes(grupo)) {
@@ -50,7 +54,6 @@ const aplicarPreset = (tipo) => {
 
         case 'rotacion_b':
             // Solo A y C disponibles (B descansa)
-            // Grupos B: 2 (Ofc), 5 (Esp), 8 (Trp)
             botones.forEach(btn => {
                 const grupo = parseInt(btn.dataset.grupo);
                 if ([2, 5, 8].includes(grupo)) {
@@ -63,7 +66,6 @@ const aplicarPreset = (tipo) => {
 
         case 'rotacion_c':
             // Solo A y B disponibles (C descansa)
-            // Grupos C: 3 (Ofc), 6 (Esp), 9 (Trp)
             botones.forEach(btn => {
                 const grupo = parseInt(btn.dataset.grupo);
                 if ([3, 6, 9].includes(grupo)) {
@@ -75,12 +77,10 @@ const aplicarPreset = (tipo) => {
             break;
 
         case 'ninguno':
-            // Desmarcar todos
             botones.forEach(btn => btn.classList.remove('active'));
             break;
     }
 
-    // Actualizar conteo después de aplicar preset
     actualizarConteoPersonal();
 };
 
@@ -106,29 +106,132 @@ document.addEventListener('DOMContentLoaded', () => {
             aplicarPreset(preset);
         });
     });
+
+    // ✨ NUEVO: Cargar próxima fecha disponible al iniciar
+    cargarProximaFechaDisponible();
 });
+
+// ========================================
+// ✨ NUEVA FUNCIÓN: Cargar próxima fecha disponible
+// ========================================
+
+const cargarProximaFechaDisponible = async () => {
+    try {
+        mostrarLoading(true);
+
+        const response = await fetch('/TERCERA_CIA/API/asignaciones/proxima-fecha');
+        const data = await response.json();
+
+        mostrarLoading(false);
+
+        if (data.codigo === 1 && data.data) {
+            const info = data.data;
+
+            // Establecer la fecha en el input
+            fechaInicio.value = info.proxima_fecha;
+
+            // Mostrar información
+            if (info.tiene_ciclos) {
+                mostrarInfoFecha(
+                    'info',
+                    `Último ciclo: ${formatearFecha(info.ultimo_ciclo_inicio)} - ${formatearFecha(info.ultimo_ciclo_fin)}<br>` +
+                    `<strong>Próxima fecha sugerida: ${formatearFecha(info.proxima_fecha)}</strong>`,
+                    true
+                );
+            } else {
+                mostrarInfoFecha(
+                    'success',
+                    'No hay ciclos generados. Puede comenzar desde hoy.',
+                    true
+                );
+            }
+
+            // Verificar si hay ciclo en la fecha cargada
+            await manejarCambioFecha();
+        }
+    } catch (error) {
+        mostrarLoading(false);
+        console.error('Error al cargar próxima fecha:', error);
+    }
+};
+
+// ========================================
+// ✨ NUEVA FUNCIÓN: Mostrar información de fecha
+// ========================================
+
+const mostrarInfoFecha = (tipo, mensaje, permanente = false) => {
+    if (!infoFecha) return;
+
+    infoFecha.style.display = 'block';
+    infoFecha.className = 'alert';
+
+    const iconos = {
+        'info': '<i class="bi bi-info-circle-fill"></i>',
+        'warning': '<i class="bi bi-exclamation-triangle-fill"></i>',
+        'success': '<i class="bi bi-check-circle-fill"></i>',
+        'danger': '<i class="bi bi-x-circle-fill"></i>'
+    };
+
+    switch (tipo) {
+        case 'info':
+            infoFecha.classList.add('alert-info');
+            break;
+        case 'warning':
+            infoFecha.classList.add('alert-warning');
+            break;
+        case 'success':
+            infoFecha.classList.add('alert-success');
+            break;
+        case 'danger':
+            infoFecha.classList.add('alert-danger');
+            break;
+    }
+
+    infoFecha.innerHTML = `${iconos[tipo]} ${mensaje}`;
+
+    if (!permanente) {
+        setTimeout(() => {
+            infoFecha.style.display = 'none';
+        }, 8000);
+    }
+};
+
+const ocultarInfoFecha = () => {
+    if (infoFecha) {
+        infoFecha.style.display = 'none';
+    }
+};
 
 // ========================================
 // FUNCIONES BÁSICAS
 // ========================================
 
 const mostrarLoading = (mostrar) => {
-    loadingOverlay.style.display = mostrar ? 'flex' : 'none';
+    if (loadingOverlay) {
+        loadingOverlay.style.display = mostrar ? 'flex' : 'none';
+    }
 };
 
 const gestionarBotones = (contexto) => {
+    // Validar que los elementos existan antes de manipularlos
+    if (!btnGenerar || !btnConsultar || !btnEliminarSemana ||
+        !btnExportarPDF || !btnRegresar) {
+        console.warn('⚠️ Algunos botones no están disponibles en el DOM');
+        return;
+    }
+
     btnGenerar.style.display = 'none';
     btnConsultar.style.display = 'none';
-    btnEliminarCiclo.style.display = 'none';
+    btnEliminarSemana.style.display = 'none';
     btnExportarPDF.style.display = 'none';
     btnRegresar.style.display = 'none';
 
     switch (contexto) {
-        case 'ciclo_existente':
+        case 'semana_existente':
             btnConsultar.style.display = '';
             estadoVista = 'seleccion';
             break;
-        case 'ciclo_nuevo':
+        case 'semana_nueva':
             btnGenerar.style.display = '';
             estadoVista = 'seleccion';
             break;
@@ -139,47 +242,145 @@ const gestionarBotones = (contexto) => {
             break;
         case 'generado_nuevo':
             btnExportarPDF.style.display = '';
-            btnEliminarCiclo.style.display = '';
+            btnEliminarSemana.style.display = '';
             btnRegresar.style.display = '';
             estadoVista = 'generando';
             break;
         case 'inicial':
             estadoVista = 'seleccion';
             break;
+        case 'fecha_ocupada':
+            // No mostrar ningún botón de acción
+            estadoVista = 'seleccion';
+            break;
     }
 };
 
-const verificarCicloExistente = async (fecha) => {
+const verificarSemanaExistente = async (fecha) => {
     try {
         const url = `/TERCERA_CIA/API/asignaciones/obtener?fecha_inicio=${fecha}`;
         const respuesta = await fetch(url);
         const data = await respuesta.json();
         return data.codigo === 1 && data.datos && data.datos.length > 0;
     } catch (error) {
-        console.error('Error al verificar ciclo:', error);
+        console.error('Error al verificar semana:', error);
         return false;
     }
 };
 
+// ========================================
+// ✨ NUEVA FUNCIÓN: Verificar disponibilidad de fecha
+// ========================================
+
+const verificarDisponibilidadFecha = async (fecha) => {
+    try {
+        const url = `/TERCERA_CIA/API/asignaciones/verificar-fecha?fecha=${fecha}`;
+        const respuesta = await fetch(url);
+        const data = await respuesta.json();
+
+        if (data.codigo === 1) {
+            return data.data;
+        }
+
+        return null;
+    } catch (error) {
+        console.error('Error al verificar disponibilidad:', error);
+        return null;
+    }
+};
+
+// ========================================
+// ✨ MODIFICADO: Manejo de cambio de fecha con validación inteligente
+// ========================================
+
 const manejarCambioFecha = async () => {
+    if (!fechaInicio) {
+        console.warn('⚠️ Input de fecha no encontrado');
+        return;
+    }
+
     const fecha = fechaInicio.value;
 
     if (!fecha) {
         gestionarBotones('inicial');
+        ocultarInfoFecha();
         return;
     }
 
     mostrarLoading(true);
-    const existe = await verificarCicloExistente(fecha);
+
+    // Verificar disponibilidad de la fecha
+    const disponibilidad = await verificarDisponibilidadFecha(fecha);
+
+    if (!disponibilidad) {
+        mostrarLoading(false);
+        return;
+    }
+
+    fechaActualInfo = disponibilidad;
+
+    if (!disponibilidad.disponible) {
+        // ✨ Fecha está dentro de un ciclo existente
+        mostrarLoading(false);
+
+        mostrarInfoFecha(
+            'warning',
+            `⚠️ <strong>Esta fecha ya está generada.</strong><br>` +
+            `${disponibilidad.mensaje}<br>` +
+            `<strong>Próxima fecha disponible: ${formatearFecha(disponibilidad.proxima_fecha_disponible)}</strong>`,
+            true
+        );
+
+        gestionarBotones('fecha_ocupada');
+
+        if (contenedorResultados) {
+            contenedorResultados.innerHTML = `
+                <div class="empty-state">
+                    <i class="bi bi-calendar-x" style="color: #ff6b6b;"></i>
+                    <h3>Fecha no disponible</h3>
+                    <p>Esta fecha pertenece a un ciclo ya generado</p>
+                    <p><strong>Ciclo existente:</strong> ${formatearFecha(disponibilidad.ciclo_inicio)} - ${formatearFecha(disponibilidad.ciclo_fin)}</p>
+                    <button class="btn btn-primary mt-3" onclick="cargarFechaSugerida('${disponibilidad.proxima_fecha_disponible}')">
+                        <i class="bi bi-calendar-plus"></i> Ir a próxima fecha disponible
+                    </button>
+                </div>
+            `;
+        }
+
+        return;
+    }
+
+    // ✨ Fecha disponible - verificar si tiene datos
+    const existe = await verificarSemanaExistente(fecha);
     mostrarLoading(false);
 
     if (existe) {
-        gestionarBotones('ciclo_existente');
+        gestionarBotones('semana_existente');
+        mostrarInfoFecha(
+            'info',
+            `📋 Este ciclo ya tiene servicios generados. Puede consultarlos o eliminarlos.`,
+            false
+        );
     } else {
-        gestionarBotones('ciclo_nuevo');
+        gestionarBotones('semana_nueva');
+
+        if (disponibilidad.proxima_fecha_disponible === fecha) {
+            mostrarInfoFecha(
+                'success',
+                `✅ Fecha disponible. Esta es la próxima fecha sugerida para generar el ciclo.`,
+                false
+            );
+        } else {
+            mostrarInfoFecha(
+                'info',
+                `📅 Fecha disponible. Puede generar el ciclo desde aquí.<br>` +
+                `<small>Próxima fecha sugerida: ${formatearFecha(disponibilidad.proxima_fecha_disponible)}</small>`,
+                false
+            );
+        }
     }
 
-    if (estadoVista === 'seleccion') {
+    if (estadoVista === 'seleccion' && contenedorResultados) {
         contenedorResultados.innerHTML = `
             <div class="empty-state">
                 <i class="bi bi-calendar-check"></i>
@@ -190,19 +391,32 @@ const manejarCambioFecha = async () => {
     }
 };
 
+// ========================================
+// ✨ NUEVA FUNCIÓN: Cargar fecha sugerida
+// ========================================
+
+window.cargarFechaSugerida = (fecha) => {
+    if (fechaInicio) {
+        fechaInicio.value = fecha;
+        manejarCambioFecha();
+    }
+};
+
 const regresarASeleccion = () => {
-    contenedorResultados.innerHTML = `
-        <div class="empty-state">
-            <i class="bi bi-calendar-check"></i>
-            <h3>Selecciona una fecha de inicio</h3>
-            <p>Elige cualquier día y genera o consulta los servicios del ciclo de 10 días</p>
-        </div>
-    `;
+    if (contenedorResultados) {
+        contenedorResultados.innerHTML = `
+            <div class="empty-state">
+                <i class="bi bi-calendar-check"></i>
+                <h3>Selecciona un ciclo</h3>
+                <p>Elige una fecha y genera o consulta los servicios del ciclo de 10 días</p>
+            </div>
+        `;
+    }
     manejarCambioFecha();
 };
 
 // ========================================
-// ✨ FUNCIONES DEL MODAL DE GRUPOS
+// FUNCIONES DEL MODAL DE GRUPOS
 // ========================================
 
 const obtenerGruposSeleccionados = () => {
@@ -219,8 +433,16 @@ const obtenerGruposSeleccionados = () => {
 const actualizarConteoPersonal = async () => {
     const gruposSeleccionados = obtenerGruposSeleccionados();
 
+    const resumen = document.getElementById('resumenSeleccion');
+    const conteo = document.getElementById('conteoPersonal');
+
+    if (!resumen || !conteo) {
+        console.warn('⚠️ Elementos de resumen no encontrados');
+        return;
+    }
+
     if (gruposSeleccionados.length === 0) {
-        document.getElementById('resumenSeleccion').style.display = 'none';
+        resumen.style.display = 'none';
         return;
     }
 
@@ -236,9 +458,6 @@ const actualizarConteoPersonal = async () => {
         const data = await response.json();
 
         if (data.codigo === 1) {
-            const resumen = document.getElementById('resumenSeleccion');
-            const conteo = document.getElementById('conteoPersonal');
-
             conteo.innerHTML = `
                 <div class="row text-center">
                     <div class="col-4">
@@ -268,67 +487,102 @@ const actualizarConteoPersonal = async () => {
 // GENERAR SERVICIOS
 // ========================================
 
-btnGenerar.addEventListener('click', (e) => {
-    e.preventDefault();
+if (btnGenerar) {
+    btnGenerar.addEventListener('click', (e) => {
+        e.preventDefault();
 
-    const fecha = fechaInicio.value;
+        if (!fechaInicio) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Error',
+                text: 'No se encontró el campo de fecha'
+            });
+            return;
+        }
 
-    if (!fecha) {
-        Swal.fire({
-            icon: 'warning',
-            title: 'Fecha requerida',
-            text: 'Debe seleccionar una fecha de inicio para el ciclo de 10 días'
-        });
-        return;
-    }
+        const fecha = fechaInicio.value;
 
-    fechaCicloModal.textContent = formatearRangoCiclo(fecha);
-    modalSeleccionGrupos.show();
-    actualizarConteoPersonal();
-});
+        if (!fecha) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Fecha requerida',
+                text: 'Debe seleccionar una fecha de inicio'
+            });
+            return;
+        }
 
-btnConfirmarGeneracion.addEventListener('click', async () => {
-    const fecha = fechaInicio.value;
-    const gruposSeleccionados = obtenerGruposSeleccionados();
+        // ✨ Verificar si la fecha está disponible
+        if (fechaActualInfo && !fechaActualInfo.disponible) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Fecha no disponible',
+                html: `
+                    <p>${fechaActualInfo.mensaje}</p>
+                    <p><strong>Próxima fecha disponible:</strong></p>
+                    <p>${formatearFecha(fechaActualInfo.proxima_fecha_disponible)}</p>
+                `,
+                confirmButtonText: 'Entendido'
+            });
+            return;
+        }
 
-    if (gruposSeleccionados.length === 0) {
-        Swal.fire({
-            icon: 'warning',
-            title: 'Sin grupos seleccionados',
-            text: 'Debe seleccionar al menos un grupo para generar servicios'
-        });
-        return;
-    }
+        if (fechaSemanaModal) {
+            fechaSemanaModal.textContent = formatearFecha(fecha);
+        }
 
-    modalSeleccionGrupos.hide();
-
-    const confirmacion = await Swal.fire({
-        icon: 'question',
-        title: '¿Generar servicios?',
-        html: `
-            <p>Se generarán los servicios para el ciclo de:</p>
-            <p><strong>${formatearRangoCiclo(fecha)}</strong></p>
-            <p><strong>${gruposSeleccionados.length} grupos seleccionados</strong></p>
-            <p style="color: #ff9966; font-weight: 600; margin-top: 1rem;">
-                <i class="bi bi-calendar-range"></i> 
-                Total: 10 días de servicios
-            </p>
-            <hr style="margin: 1.5rem 0; border-top: 2px solid #e2e8f0;">
-            <p style="color: #ff6b6b; font-weight: 600; margin-top: 1rem;">
-                <i class="bi bi-exclamation-triangle-fill"></i> 
-                Recuerde que el personal que está en otra comisión que no sea Descanso, debe ser desactivado desde el panel de Gestión de Personal antes de generar los servicios.
-            </p>
-        `,
-        showCancelButton: true,
-        confirmButtonText: 'Sí, generar',
-        cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#2d5016'
+        if (modalSeleccionGrupos) {
+            modalSeleccionGrupos.show();
+            actualizarConteoPersonal();
+        } else {
+            console.error('Modal de grupos no disponible');
+        }
     });
+}
 
-    if (!confirmacion.isConfirmed) return;
+if (btnConfirmarGeneracion) {
+    btnConfirmarGeneracion.addEventListener('click', async () => {
+        if (!fechaInicio) return;
 
-    await generarServiciosConGrupos(fecha, gruposSeleccionados);
-});
+        const fecha = fechaInicio.value;
+        const gruposSeleccionados = obtenerGruposSeleccionados();
+
+        if (gruposSeleccionados.length === 0) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Sin grupos seleccionados',
+                text: 'Debe seleccionar al menos un grupo para generar servicios'
+            });
+            return;
+        }
+
+        if (modalSeleccionGrupos) {
+            modalSeleccionGrupos.hide();
+        }
+
+        const confirmacion = await Swal.fire({
+            icon: 'question',
+            title: '¿Generar servicios?',
+            html: `
+                <p>Se generarán los servicios para el <strong>CICLO DE 10 DÍAS</strong> del:</p>
+                <p><strong>${formatearFecha(fecha)}</strong></p>
+                <p><strong>${gruposSeleccionados.length} grupos seleccionados</strong></p>
+                <hr style="margin: 1.5rem 0; border-top: 2px solid #e2e8f0;">
+                <p style="color: #ff6b6b; font-weight: 600; margin-top: 1rem;">
+                    <i class="bi bi-exclamation-triangle-fill"></i> 
+                    Recuerde que el personal en otra comisión (que no sea Descanso) debe ser desactivado desde el panel de Gestión de Personal antes de generar los servicios.
+                </p>
+            `,
+            showCancelButton: true,
+            confirmButtonText: 'Sí, generar',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#2d5016'
+        });
+
+        if (!confirmacion.isConfirmed) return;
+
+        await generarServiciosConGrupos(fecha, gruposSeleccionados);
+    });
+}
 
 const generarServiciosConGrupos = async (fecha, grupos) => {
     try {
@@ -383,6 +637,7 @@ const generarServiciosConGrupos = async (fecha, grupos) => {
 
                 mostrarServicios(datosGenerados, fecha);
                 gestionarBotones('generado_nuevo');
+                ocultarInfoFecha();
             } else {
                 Swal.fire({
                     icon: 'warning',
@@ -426,7 +681,7 @@ const consultarServicios = async () => {
         Swal.fire({
             icon: 'warning',
             title: 'Fecha requerida',
-            text: 'Debe seleccionar una fecha de inicio para el ciclo'
+            text: 'Debe seleccionar una fecha de inicio'
         });
         return;
     }
@@ -443,6 +698,7 @@ const consultarServicios = async () => {
         if (data.codigo === 1 && data.datos.length > 0) {
             mostrarServicios(data.datos, fecha);
             gestionarBotones('consultando');
+            ocultarInfoFecha();
         } else {
             contenedorResultados.innerHTML = `
                 <div class="empty-state">
@@ -480,7 +736,10 @@ const consultarServiciosSinUI = async (fecha) => {
     }
 };
 
-// Mostrar servicios agrupados por día
+// ========================================
+// MOSTRAR SERVICIOS (igual que antes)
+// ========================================
+
 const mostrarServicios = (asignaciones, fechaInicio) => {
     if (!asignaciones || asignaciones.length === 0) {
         contenedorResultados.innerHTML = `
@@ -517,8 +776,10 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
 
     let html = '';
 
+    // Mostrar servicio SEMANA
     if (serviciosSemana.length > 0) {
-        const fechaFin = calcularFechaFin(fechaInicio, 9);
+        const fechaFinCiclo = new Date(fechaInicio);
+        fechaFinCiclo.setDate(fechaFinCiclo.getDate() + 9);
 
         html += `
             <div class="row mb-4">
@@ -526,7 +787,7 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                     <div class="week-service-card">
                         <h3 class="week-title">
                             <i class="bi bi-calendar-range"></i>
-                            Servicio Semanal (${formatearFecha(fechaInicio)} - ${formatearFecha(fechaFin)})
+                            Servicio Ciclo Completo (${formatearFecha(fechaInicio)} - ${formatearFecha(fechaFinCiclo.toISOString().split('T')[0])})
                         </h3>
         `;
 
@@ -539,7 +800,7 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
             html += `
                 <div class="semana-card">
                     <div class="semana-header">
-                        <h4><i class="bi bi-shield-fill"></i> Semana</h4>
+                        <h4><i class="bi bi-shield-fill"></i> Ciclo Completo (10 días)</h4>
                         <span class="badge bg-warning text-dark">10 días completos</span>
                     </div>
                     <div class="semana-content">
@@ -548,7 +809,7 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                                 <strong>${gradoCompleto}</strong> ${s.nombre_completo}
                             </div>
                             <div class="text-muted">
-                                <i class="bi bi-clock"></i> Todo el ciclo (10 días)
+                                <i class="bi bi-clock"></i> Todo el ciclo
                             </div>
                         </div>
                     </div>
@@ -565,6 +826,7 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
 
     html += '<div class="row">';
 
+    // Mostrar servicios por día
     Object.keys(serviciosPorDia).sort().forEach(fecha => {
         const serviciosDelDia = serviciosPorDia[fecha];
         const serviciosAgrupados = agruparPorServicio(serviciosDelDia);
@@ -686,13 +948,13 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
 // ELIMINAR CICLO
 // ========================================
 
-const eliminarCiclo = async () => {
+const eliminarSemana = async () => {
     const fecha = fechaInicio.value;
 
     const confirmacion = await Swal.fire({
         icon: 'warning',
         title: '¿Eliminar ciclo completo?',
-        html: `Se eliminarán TODOS los servicios del ciclo de 10 días que inicia:<br><strong>${formatearFecha(fecha)}</strong><br><br><small>Esto incluye todos los días del ciclo</small>`,
+        html: `Se eliminarán TODOS los servicios del ciclo de 10 días del:<br><strong>${formatearFecha(fecha)}</strong>`,
         showCancelButton: true,
         confirmButtonText: 'Sí, eliminar',
         cancelButtonText: 'Cancelar',
@@ -737,6 +999,9 @@ const eliminarCiclo = async () => {
                 icon: 'success',
                 title: data.mensaje
             });
+
+            // Recargar próxima fecha disponible
+            await cargarProximaFechaDisponible();
             regresarASeleccion();
         } else {
             Swal.fire({
@@ -764,7 +1029,7 @@ const exportarPDF = () => {
     const fechaSeleccionada = fechaInicio.value;
 
     if (!fechaSeleccionada) {
-        Swal.fire('Error', 'Debes seleccionar una fecha de inicio', 'error');
+        Swal.fire('Error', 'Debes seleccionar una fecha', 'error');
         return;
     }
 
@@ -772,14 +1037,8 @@ const exportarPDF = () => {
 };
 
 // ========================================
-// FUNCIONES AUXILIARES DE FECHAS
+// FORMATEAR FECHA
 // ========================================
-
-const calcularFechaFin = (fechaInicio, dias) => {
-    const fecha = new Date(fechaInicio + 'T00:00:00');
-    fecha.setDate(fecha.getDate() + dias);
-    return fecha.toISOString().split('T')[0];
-};
 
 const formatearFecha = (fecha) => {
     const date = new Date(fecha + 'T00:00:00');
@@ -792,24 +1051,32 @@ const formatearFecha = (fecha) => {
     return date.toLocaleDateString('es-ES', opciones);
 };
 
-const formatearRangoCiclo = (fechaInicio) => {
-    const fechaFin = calcularFechaFin(fechaInicio, 9);
-    return `${formatearFecha(fechaInicio)} - ${formatearFecha(fechaFin)}`;
-};
-
 // ========================================
 // EVENT LISTENERS
 // ========================================
 
-btnConsultar.addEventListener('click', consultarServicios);
-btnEliminarCiclo.addEventListener('click', eliminarCiclo);
-btnExportarPDF.addEventListener('click', exportarPDF);
-btnRegresar.addEventListener('click', regresarASeleccion);
-fechaInicio.addEventListener('change', manejarCambioFecha);
+if (btnConsultar) {
+    btnConsultar.addEventListener('click', consultarServicios);
+}
+
+if (btnEliminarSemana) {
+    btnEliminarSemana.addEventListener('click', eliminarSemana);
+}
+
+if (btnExportarPDF) {
+    btnExportarPDF.addEventListener('click', exportarPDF);
+}
+
+if (btnRegresar) {
+    btnRegresar.addEventListener('click', regresarASeleccion);
+}
+
+if (fechaInicio) {
+    fechaInicio.addEventListener('change', manejarCambioFecha);
+}
 
 // ========================================
 // INICIALIZAR
 // ========================================
 
 gestionarBotones('inicial');
-fechaInicio.value = '';

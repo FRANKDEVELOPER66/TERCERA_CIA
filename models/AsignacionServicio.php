@@ -1435,6 +1435,163 @@ class AsignacionServicio extends ActiveRecord
         }
     }
 
+    /**
+     * ✨ NUEVA FUNCIÓN: Verificar si una fecha está disponible o dentro de un ciclo existente
+     */
+    public static function verificarDisponibilidadFecha($fecha)
+    {
+        $resultado = [
+            'disponible' => true,
+            'en_ciclo_existente' => false,
+            'ciclo_inicio' => null,
+            'ciclo_fin' => null,
+            'proxima_fecha_disponible' => null,
+            'mensaje' => ''
+        ];
+
+        // Buscar si existe algún ciclo que contenga esta fecha
+        $sql = "SELECT MIN(fecha_servicio) as inicio, MAX(fecha_servicio) as fin
+                FROM asignaciones_servicio
+                WHERE fecha_servicio >= DATE_SUB(:fecha, INTERVAL 9 DAY)
+                AND fecha_servicio <= DATE_ADD(:fecha, INTERVAL 9 DAY)
+                HAVING COUNT(DISTINCT fecha_servicio) > 0";
+
+        $ciclo = self::fetchFirst($sql, [':fecha' => $fecha]);
+
+        if ($ciclo && $ciclo['inicio']) {
+            $fecha_inicio = new \DateTime($ciclo['inicio']);
+            $fecha_fin = new \DateTime($ciclo['fin']);
+            $fecha_consulta = new \DateTime($fecha);
+
+            // Verificar si la fecha está dentro del rango del ciclo
+            if ($fecha_consulta >= $fecha_inicio && $fecha_consulta <= $fecha_fin) {
+                // Calcular días de diferencia
+                $diff = (new \DateTime($ciclo['inicio']))->diff(new \DateTime($fecha));
+                $dias_diff = $diff->days;
+
+                // Solo marcar como ocupada si está dentro de los 10 días
+                if ($dias_diff < 10) {
+                    $resultado['disponible'] = false;
+                    $resultado['en_ciclo_existente'] = true;
+                    $resultado['ciclo_inicio'] = $ciclo['inicio'];
+                    $resultado['ciclo_fin'] = $ciclo['fin'];
+
+                    // Próxima fecha disponible es el día siguiente al fin del ciclo
+                    $siguiente = new \DateTime($ciclo['fin']);
+                    $siguiente->modify('+1 day');
+                    $resultado['proxima_fecha_disponible'] = $siguiente->format('Y-m-d');
+
+                    $resultado['mensaje'] = "Esta fecha pertenece al ciclo del " .
+                        self::formatearFechaCorta($ciclo['inicio']) .
+                        " al " .
+                        self::formatearFechaCorta($ciclo['fin']);
+                }
+            }
+        }
+
+        // Si está disponible, verificar cuál es la próxima fecha recomendada
+        if ($resultado['disponible']) {
+            $info_proxima = self::obtenerProximaFechaDisponible();
+            $resultado['proxima_fecha_disponible'] = $info_proxima['proxima_fecha'];
+            $resultado['mensaje'] = 'Fecha disponible para generar ciclo';
+        }
+
+        return $resultado;
+    }
+
+    /**
+     * ✨ NUEVA FUNCIÓN: Obtener la próxima fecha disponible para generar un ciclo
+     */
+    public static function obtenerProximaFechaDisponible()
+    {
+        // Buscar el último ciclo generado
+        $sql = "SELECT MAX(fecha_servicio) as ultima_fecha
+                FROM asignaciones_servicio";
+
+        $resultado_query = self::fetchFirst($sql, []);
+
+        if (!$resultado_query || !$resultado_query['ultima_fecha']) {
+            // No hay ciclos, la próxima fecha es hoy
+            $hoy = new \DateTime();
+            return [
+                'tiene_ciclos' => false,
+                'ultimo_ciclo_fin' => null,
+                'proxima_fecha' => $hoy->format('Y-m-d'),
+                'mensaje' => 'No hay ciclos generados. Puede comenzar desde hoy.'
+            ];
+        }
+
+        $ultima_fecha = new \DateTime($resultado_query['ultima_fecha']);
+
+        // Buscar el inicio de ese ciclo
+        $sql_inicio = "SELECT MIN(fecha_servicio) as inicio
+                      FROM asignaciones_servicio
+                      WHERE fecha_servicio >= DATE_SUB(:fecha, INTERVAL 9 DAY)
+                      AND fecha_servicio <= :fecha2";
+
+        $ciclo = self::fetchFirst($sql_inicio, [
+            ':fecha' => $resultado_query['ultima_fecha'],
+            ':fecha2' => $resultado_query['ultima_fecha']
+        ]);
+
+        if ($ciclo && $ciclo['inicio']) {
+            $inicio_ultimo_ciclo = new \DateTime($ciclo['inicio']);
+            $fin_ultimo_ciclo = clone $inicio_ultimo_ciclo;
+            $fin_ultimo_ciclo->modify('+9 days');
+
+            // La próxima fecha disponible es el día siguiente al fin del último ciclo
+            $proxima = clone $fin_ultimo_ciclo;
+            $proxima->modify('+1 day');
+
+            return [
+                'tiene_ciclos' => true,
+                'ultimo_ciclo_inicio' => $inicio_ultimo_ciclo->format('Y-m-d'),
+                'ultimo_ciclo_fin' => $fin_ultimo_ciclo->format('Y-m-d'),
+                'proxima_fecha' => $proxima->format('Y-m-d'),
+                'mensaje' => 'La próxima fecha disponible es después del último ciclo'
+            ];
+        }
+
+        // Fallback: día siguiente a la última fecha encontrada
+        $proxima = clone $ultima_fecha;
+        $proxima->modify('+1 day');
+
+        return [
+            'tiene_ciclos' => true,
+            'ultimo_ciclo_fin' => $ultima_fecha->format('Y-m-d'),
+            'proxima_fecha' => $proxima->format('Y-m-d'),
+            'mensaje' => 'Próxima fecha calculada'
+        ];
+    }
+
+    /**
+     * ✨ NUEVA FUNCIÓN: Formatear fecha corta en español
+     */
+    private static function formatearFechaCorta($fecha)
+    {
+        $fecha_obj = new \DateTime($fecha);
+        $meses = [
+            1 => 'ene',
+            2 => 'feb',
+            3 => 'mar',
+            4 => 'abr',
+            5 => 'may',
+            6 => 'jun',
+            7 => 'jul',
+            8 => 'ago',
+            9 => 'sep',
+            10 => 'oct',
+            11 => 'nov',
+            12 => 'dic'
+        ];
+
+        $dia = $fecha_obj->format('d');
+        $mes = $meses[(int)$fecha_obj->format('m')];
+        $anio = $fecha_obj->format('Y');
+
+        return "{$dia}/{$mes}/{$anio}";
+    }
+
     private static function recalcularHistorialPersona($id_personal)
     {
         error_log("🔄 Recalculando historial para persona ID: {$id_personal}");

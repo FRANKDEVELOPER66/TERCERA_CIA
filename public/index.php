@@ -35,5 +35,14 @@ $router->get('/asignaciones/debug', [AsignacionController::class, 'debugAsignaci
 $router->post('/API/asignaciones/contar-personal', [AsignacionController::class, 'contarPersonalAPI']);
 
 
+
+$router->get('/API/asignaciones/verificar-fecha', [AsignacionController::class, 'verificarFechaAPI']);
+
+// Ruta para obtener la próxima fecha disponible
+$router->get('/API/asignaciones/proxima-fecha', [AsignacionController::class, 'proximaFechaAPI']);
+
+// Las
+
+
 // Comprueba y valida las rutas
 $router->comprobarRutas();

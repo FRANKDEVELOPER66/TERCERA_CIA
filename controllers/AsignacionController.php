@@ -110,9 +110,6 @@ class AsignacionController
         }
     }
 
-    /**
-     * ✅ Contar personal disponible SIN calendario de descansos
-     */
     public static function contarPersonalAPI()
     {
         header('Content-Type: application/json; charset=UTF-8');
@@ -121,8 +118,6 @@ class AsignacionController
             $json = file_get_contents('php://input');
             $data = json_decode($json, true);
             $grupos = $data['grupos'] ?? [];
-
-            error_log("📦 Grupos recibidos para contar: " . json_encode($grupos));
 
             if (!is_array($grupos) || empty($grupos)) {
                 http_response_code(400);
@@ -146,7 +141,6 @@ class AsignacionController
             $in_clause = implode(',', $placeholders);
             $params[':fecha'] = $fecha_actual;
 
-            // Contar Oficiales
             $sql_oficiales = "SELECT COUNT(*) as total 
                          FROM bhr_personal p
                          LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
@@ -157,9 +151,7 @@ class AsignacionController
                          AND cd.id_calendario IS NULL";
 
             $oficiales = AsignacionServicio::fetchFirst($sql_oficiales, $params);
-            error_log("👮 Oficiales disponibles: " . ($oficiales['total'] ?? 0));
 
-            // Contar Especialistas
             $sql_especialistas = "SELECT COUNT(*) as total 
                              FROM bhr_personal p
                              LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
@@ -170,9 +162,7 @@ class AsignacionController
                              AND cd.id_calendario IS NULL";
 
             $especialistas = AsignacionServicio::fetchFirst($sql_especialistas, $params);
-            error_log("🔧 Especialistas disponibles: " . ($especialistas['total'] ?? 0));
 
-            // Contar Tropa
             $sql_tropa = "SELECT COUNT(*) as total 
                      FROM bhr_personal p
                      LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
@@ -183,10 +173,7 @@ class AsignacionController
                      AND cd.id_calendario IS NULL";
 
             $tropa = AsignacionServicio::fetchFirst($sql_tropa, $params);
-            error_log("🎖️ Tropa disponible: " . ($tropa['total'] ?? 0));
-
             $total = ($oficiales['total'] ?? 0) + ($especialistas['total'] ?? 0) + ($tropa['total'] ?? 0);
-            error_log("✅ Total personal disponible: " . $total);
 
             http_response_code(200);
             echo json_encode([
@@ -198,13 +185,74 @@ class AsignacionController
                 'total' => $total
             ], JSON_UNESCAPED_UNICODE);
         } catch (\Exception $e) {
-            error_log("❌ ERROR en contarPersonalAPI: " . $e->getMessage());
-
             http_response_code(500);
             echo json_encode([
                 'codigo' => 0,
                 'mensaje' => 'Error al contar personal',
                 'detalle' => $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    /**
+     * ✨ NUEVO: Obtiene información sobre ciclos y próxima fecha disponible
+     */
+    public static function verificarFechaAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        $fecha = $_GET['fecha'] ?? '';
+
+        if (empty($fecha)) {
+            http_response_code(400);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Debe proporcionar una fecha',
+            ], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+
+        try {
+            $info = AsignacionServicio::verificarDisponibilidadFecha($fecha);
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Información obtenida',
+                'data' => $info
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al verificar fecha',
+                'detalle' => $e->getMessage(),
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    /**
+     * ✨ NUEVO: Obtiene la próxima fecha disponible para generar ciclo
+     */
+    public static function proximaFechaAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $info = AsignacionServicio::obtenerProximaFechaDisponible();
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Próxima fecha obtenida',
+                'data' => $info
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al obtener próxima fecha',
+                'detalle' => $e->getMessage(),
             ], JSON_UNESCAPED_UNICODE);
         }
     }
@@ -375,7 +423,7 @@ class AsignacionController
     }
 
     /**
-     * ✅ Genera página individual de un día
+     * ✅ Genera página individual de un día (sin cambios)
      */
     private static function generarPaginaDia($dia_nombre, $fecha_formateada, $oficial_dia, $servicios_agrupados)
     {
@@ -572,9 +620,9 @@ class AsignacionController
         });
 
         // ✅ GENERAR 2 TABLAS DE 5 DÍAS CADA UNA
-        $html .= self::generarTablaRango($personal_servicios, 1, 5, "DÍAS 1-5", $fecha_inicio);
+        $html .= self::generarTablaRango($personal_servicios, 1, 5, "DÍAS 1-5");
         $html .= '<div style="height: 30px;"></div>'; // Separador
-        $html .= self::generarTablaRango($personal_servicios, 6, 10, "DÍAS 6-10", $fecha_inicio);
+        $html .= self::generarTablaRango($personal_servicios, 6, 10, "DÍAS 6-10");
 
         // Leyenda
         $html .= '
@@ -602,9 +650,9 @@ class AsignacionController
     }
 
     /**
-     * ✅ MODIFICADO: Genera una tabla para un rango de días específico CON NOMBRES DE DÍAS
+     * ✅ NUEVA FUNCIÓN: Genera una tabla para un rango de días específico
      */
-    private static function generarTablaRango($personal_servicios, $dia_inicio, $dia_fin, $titulo, $fecha_inicio)
+    private static function generarTablaRango($personal_servicios, $dia_inicio, $dia_fin, $titulo)
     {
         $html = '
     <div style="page-break-inside: avoid;">
@@ -614,15 +662,9 @@ class AsignacionController
                 <tr style="background: #2d5016; color: white;">
                     <th style="border: 1px solid #ddd; padding: 8px; text-align: left; width: 23%;">NOMBRE</th>';
 
-        // ✨ MODIFICACIÓN: Headers con día de la semana + fecha
+        // Headers de días
         for ($dia = $dia_inicio; $dia <= $dia_fin; $dia++) {
-            $fecha_dia = new \DateTime($fecha_inicio);
-            $fecha_dia->modify('+' . ($dia - 1) . ' days');
-
-            $dia_semana = self::getNombreDiaCorto($fecha_dia->format('N'));
-            $dia_numero = $fecha_dia->format('d');
-
-            $html .= '<th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 12%; font-size: 8px;">' . strtoupper($dia_semana) . ' ' . $dia_numero . '</th>';
+            $html .= '<th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 12%;">DÍA ' . $dia . '</th>';
         }
 
         $html .= '
@@ -703,32 +745,8 @@ class AsignacionController
     }
 
     // ========================================
-    // FUNCIONES AUXILIARES
+    // FUNCIONES AUXILIARES (sin cambios)
     // ========================================
-
-    private static function formatearFechaEspanol($fecha_obj)
-    {
-        $meses = [
-            1 => 'enero',
-            2 => 'febrero',
-            3 => 'marzo',
-            4 => 'abril',
-            5 => 'mayo',
-            6 => 'junio',
-            7 => 'julio',
-            8 => 'agosto',
-            9 => 'septiembre',
-            10 => 'octubre',
-            11 => 'noviembre',
-            12 => 'diciembre'
-        ];
-
-        $dia = $fecha_obj->format('d');
-        $mes = $meses[(int)$fecha_obj->format('m')];
-        $anio = $fecha_obj->format('Y');
-
-        return "{$dia} de {$mes} de {$anio}";
-    }
 
     private static function obtenerNumeroTurno($asignacion_actual, $todas_asignaciones)
     {
@@ -758,13 +776,28 @@ class AsignacionController
         return $dias[$num];
     }
 
-    /**
-     * ✨ NUEVA FUNCIÓN: Obtiene nombre corto del día
-     */
-    private static function getNombreDiaCorto($num)
+    private static function formatearFechaEspanol($fecha_obj)
     {
-        $dias = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
-        return $dias[$num];
+        $meses = [
+            1 => 'enero',
+            2 => 'febrero',
+            3 => 'marzo',
+            4 => 'abril',
+            5 => 'mayo',
+            6 => 'junio',
+            7 => 'julio',
+            8 => 'agosto',
+            9 => 'septiembre',
+            10 => 'octubre',
+            11 => 'noviembre',
+            12 => 'diciembre'
+        ];
+
+        $dia = $fecha_obj->format('d');
+        $mes = $meses[(int)$fecha_obj->format('m')];
+        $anio = $fecha_obj->format('Y');
+
+        return "{$dia} de {$mes} de {$anio}";
     }
 
     private static function getAbreviatura($servicio)

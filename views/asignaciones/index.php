@@ -306,6 +306,59 @@
         margin-bottom: 1rem;
         opacity: 0.3;
     }
+
+    /* Estilos para botones toggle */
+    .btn-grupo {
+        padding: 12px 20px;
+        font-weight: 600;
+        border-width: 2px;
+        transition: all 0.3s ease;
+        position: relative;
+    }
+
+    .btn-grupo i {
+        margin-right: 5px;
+        display: none;
+    }
+
+    .btn-grupo.active i {
+        display: inline;
+    }
+
+    .btn-grupo.active {
+        transform: scale(1.05);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .btn-grupo:not(.active) {
+        opacity: 0.5;
+    }
+
+    .btn-grupo:hover {
+        transform: scale(1.05);
+    }
+
+    .grupo-categoria {
+        border-left: 4px solid transparent;
+        padding-left: 10px;
+        transition: all 0.3s ease;
+    }
+
+    .grupo-categoria:hover {
+        background: rgba(0, 0, 0, 0.02);
+        border-radius: 8px;
+    }
+
+    /* Botones de preset */
+    .preset-btn {
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+
+    .preset-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
 </style>
 
 <div class="container-fluid mt-4">
@@ -330,12 +383,17 @@
                             type="date"
                             id="fechaInicio"
                             class="form-control form-control-lg"
-                            placeholder="Seleccione cualquier día">
+                            placeholder="Seleccione una fecha">
+
+                        <!-- ✨ NUEVO: Información dinámica de la fecha -->
+                        <div id="infoFecha" class="alert mt-3" style="display: none;" role="alert"></div>
+
                         <small class="text-muted">
                             <i class="bi bi-info-circle"></i>
-                            <strong>Puede seleccionar cualquier día</strong> - El sistema generará un ciclo de 10 días consecutivos
+                            Seleccione cualquier fecha disponible para iniciar el ciclo de 10 días
                         </small>
                     </div>
+
                     <div class="d-flex gap-2 align-items-end">
                         <!-- ✨ Botón Generar -->
                         <button id="btnGenerar" class="btn btn-generate" style="display: none;">
@@ -368,11 +426,15 @@
     </div>
 
     <!-- Contenedor de Resultados -->
-    <div id="contenedorResultados">
-        <div class="empty-state">
-            <i class="bi bi-calendar-check"></i>
-            <h3>Selecciona una fecha de inicio</h3>
-            <p>Elige cualquier día y genera un ciclo de 10 días de servicios</p>
+    <div class="row">
+        <div class="col-12">
+            <div id="contenedorResultados">
+                <div class="empty-state">
+                    <i class="bi bi-calendar-check"></i>
+                    <h3>Selecciona una fecha de inicio</h3>
+                    <p>Elige cualquier día y genera un ciclo de 10 días de servicios</p>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -501,61 +563,6 @@
             </div>
         </div>
     </div>
-
-    <style>
-        /* Estilos para botones toggle */
-        .btn-grupo {
-            padding: 12px 20px;
-            font-weight: 600;
-            border-width: 2px;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-
-        .btn-grupo i {
-            margin-right: 5px;
-            display: none;
-        }
-
-        .btn-grupo.active i {
-            display: inline;
-        }
-
-        .btn-grupo.active {
-            transform: scale(1.05);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-
-        .btn-grupo:not(.active) {
-            opacity: 0.5;
-        }
-
-        .btn-grupo:hover {
-            transform: scale(1.05);
-        }
-
-        .grupo-categoria {
-            border-left: 4px solid transparent;
-            padding-left: 10px;
-            transition: all 0.3s ease;
-        }
-
-        .grupo-categoria:hover {
-            background: rgba(0, 0, 0, 0.02);
-            border-radius: 8px;
-        }
-
-        /* Botones de preset */
-        .preset-btn {
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-
-        .preset-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-    </style>
 </div>
 
 <!-- Loading Overlay -->
