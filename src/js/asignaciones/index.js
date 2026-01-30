@@ -1024,7 +1024,7 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
                     <div class="week-service-card">
                         <h3 class="week-title">
                             <i class="bi bi-calendar-range"></i>
-                            Servicio Ciclo Completo (${formatearFecha(fechaInicio)} - ${formatearFecha(fechaFinCiclo.toISOString().split('T')[0])})
+                            Servicios para el Ciclo Completo (${formatearFecha(fechaInicio)} al ${formatearFecha(fechaFinCiclo.toISOString().split('T')[0])})
                         </h3>
         `;
 
@@ -1037,7 +1037,7 @@ const mostrarServicios = (asignaciones, fechaInicio) => {
             html += `
                 <div class="semana-card">
                     <div class="semana-header">
-                        <h4><i class="bi bi-shield-fill"></i> Ciclo Completo (10 días)</h4>
+                        <h4><i class="bi bi-shield-fill"></i> Semana del Ciclo Completo (10 días)</h4>
                         <span class="badge bg-warning text-dark">10 días completos</span>
                     </div>
                     <div class="semana-content">

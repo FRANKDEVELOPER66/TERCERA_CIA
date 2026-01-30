@@ -334,9 +334,11 @@ class AsignacionController
     }
 
     /**
-     * ✅ MODIFICADO: Exporta PDF de ciclo de 10 días
+     * ✅ MEJORADO: Exporta PDF de ciclo de 10 días
      * - 10 páginas individuales (una por día)
-     * - 1 cronograma dividido en 2 tablas de 5 días cada una
+     * - 1 cronograma dividido en 2 tablas de 5 días cada una CON FECHAS REALES
+     * - Muestra el TIPO de personal correctamente (ESPECIALISTA)
+     * - Separa visualmente ESPECIALISTAS de TROPA con líneas divisorias
      */
     public static function exportarPDF(Router $router)
     {
@@ -407,7 +409,7 @@ class AsignacionController
                 $contador_dia++;
             }
 
-            // ✅ GENERAR CRONOGRAMA EN 2 TABLAS DE 5 DÍAS
+            // ✅ GENERAR CRONOGRAMA EN 2 TABLAS DE 5 DÍAS CON FECHAS REALES
             $html .= '<pagebreak />';
             $html .= self::generarCronogramaCiclo($asignaciones, $fecha_inicio);
 
@@ -515,7 +517,10 @@ class AsignacionController
     }
 
     /**
-     * ✅ MODIFICADO: Genera cronograma dividido en 2 tablas de 5 días cada una
+     * ✅ MEJORADO: Genera cronograma dividido en 2 tablas de 5 días cada una
+     * - Muestra días de la semana y fechas reales en los encabezados
+     * - Muestra el tipo de personal correctamente (ESPECIALISTA)
+     * - Separa visualmente ESPECIALISTAS de TROPA
      */
     private static function generarCronogramaCiclo($asignaciones, $fecha_inicio)
     {
@@ -544,9 +549,15 @@ class AsignacionController
             $dia_num = (new \DateTime($fecha_servicio))->diff(new \DateTime($fecha_inicio))->days + 1;
 
             if (!isset($personal_servicios[$id])) {
+                // ✨ MEJORADO: Guardar el tipo de personal
+                $grado_mostrar = $asig['grado'];
+                if (!empty($asig['tipo_personal']) && $asig['tipo_personal'] === 'ESPECIALISTA') {
+                    $grado_mostrar .= ' ESPECIALISTA';
+                }
+
                 $personal_servicios[$id] = [
                     'nombre' => $asig['nombre_completo'],
-                    'grado' => $asig['grado'],
+                    'grado' => $grado_mostrar,  // ✅ Ahora incluye "ESPECIALISTA" si aplica
                     'tipo' => $asig['tipo_personal'],
                     'servicios' => [],
                     'tiene_semana' => false
@@ -571,9 +582,15 @@ class AsignacionController
         foreach ($serviciosSemana as $s) {
             $id = $s['id_personal'];
             if (!isset($personal_servicios[$id])) {
+                // ✨ MEJORADO: Incluir tipo de personal
+                $grado_mostrar = $s['grado'];
+                if (!empty($s['tipo_personal']) && $s['tipo_personal'] === 'ESPECIALISTA') {
+                    $grado_mostrar .= ' ESPECIALISTA';
+                }
+
                 $personal_servicios[$id] = [
                     'nombre' => $s['nombre_completo'],
-                    'grado' => $s['grado'],
+                    'grado' => $grado_mostrar,
                     'tipo' => $s['tipo_personal'],
                     'servicios' => [],
                     'tiene_semana' => true
@@ -595,20 +612,24 @@ class AsignacionController
         }
         unset($persona);
 
-        // Ordenar
+        // ✅ MEJORADO: Ordenar separando ESPECIALISTAS y TROPA
         uasort($personal_servicios, function ($a, $b) {
             $tipo_a = $a['tipo'] ?? 'TROPA';
             $tipo_b = $b['tipo'] ?? 'TROPA';
 
+            // Prioridad: ESPECIALISTAS primero
             if ($tipo_a === 'ESPECIALISTA' && $tipo_b !== 'ESPECIALISTA') return -1;
             if ($tipo_a !== 'ESPECIALISTA' && $tipo_b === 'ESPECIALISTA') return 1;
 
+            // Dentro del mismo tipo, ordenar por grado
             $orden_grados = [
-                'Soldado de Primera' => 1,
-                'Soldado de Segunda' => 2,
-                'Cabo' => 3,
-                'Sargento 2do.' => 4,
-                'Sargento 1ro.' => 5
+                'Soldado de Segunda ESPECIALISTA' => 1,
+                'Soldado de Primera ESPECIALISTA' => 2,
+                'Soldado de Segunda' => 3,
+                'Soldado de Primera' => 4,
+                'Cabo' => 5,
+                'Sargento 2do.' => 6,
+                'Sargento 1ro.' => 7
             ];
 
             $grado_a = $orden_grados[$a['grado']] ?? 999;
@@ -619,10 +640,10 @@ class AsignacionController
             return $a['total_servicios'] - $b['total_servicios'];
         });
 
-        // ✅ GENERAR 2 TABLAS DE 5 DÍAS CADA UNA
-        $html .= self::generarTablaRango($personal_servicios, 1, 5, "DÍAS 1-5");
+        // ✅ GENERAR 2 TABLAS DE 5 DÍAS CADA UNA CON FECHAS
+        $html .= self::generarTablaRango($personal_servicios, 1, 5, "DÍAS 1-5", $fecha_inicio);
         $html .= '<div style="height: 30px;"></div>'; // Separador
-        $html .= self::generarTablaRango($personal_servicios, 6, 10, "DÍAS 6-10");
+        $html .= self::generarTablaRango($personal_servicios, 6, 10, "DÍAS 6-10", $fecha_inicio);
 
         // Leyenda
         $html .= '
@@ -650,9 +671,12 @@ class AsignacionController
     }
 
     /**
-     * ✅ NUEVA FUNCIÓN: Genera una tabla para un rango de días específico
+     * ✅ MEJORADO: Genera una tabla para un rango de días específico CON FECHAS REALES
+     * - Muestra días de la semana abreviados (MAR, MIÉ, etc.)
+     * - Muestra el número de día del mes
+     * - Separa ESPECIALISTAS de TROPA con línea divisoria verde
      */
-    private static function generarTablaRango($personal_servicios, $dia_inicio, $dia_fin, $titulo)
+    private static function generarTablaRango($personal_servicios, $dia_inicio, $dia_fin, $titulo, $fecha_inicio_ciclo)
     {
         $html = '
     <div style="page-break-inside: avoid;">
@@ -660,32 +684,60 @@ class AsignacionController
         <table style="width: 100%; border-collapse: collapse; font-size: 9px;">
             <thead>
                 <tr style="background: #2d5016; color: white;">
-                    <th style="border: 1px solid #ddd; padding: 8px; text-align: left; width: 23%;">NOMBRE</th>';
+                    <th style="border: 1px solid #ddd; padding: 8px; text-align: left; width: 23%; color: white;">NOMBRE</th>';
 
-        // Headers de días
+        // ✅ Headers de días CON FECHAS REALES
         for ($dia = $dia_inicio; $dia <= $dia_fin; $dia++) {
-            $html .= '<th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 12%;">DÍA ' . $dia . '</th>';
+            $fecha_actual = new \DateTime($fecha_inicio_ciclo);
+            $fecha_actual->modify('+' . ($dia - 1) . ' days');
+
+            $dia_semana = self::getNombreDiaCorto($fecha_actual->format('N'));
+            $dia_numero = $fecha_actual->format('d');
+
+            $html .= '<th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 12%; font-size: 8px; color: white;">
+                        <div style="font-weight: bold; color: white;">' . strtoupper($dia_semana) . '</div>
+                        <div style="font-size: 11px; font-weight: bold; margin-top: 2px; color: white;">' . $dia_numero . '</div>
+                      </th>';
         }
 
         $html .= '
-                    <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 7%;">TOTAL</th>
+                    <th style="border: 1px solid #ddd; padding: 6px; text-align: center; width: 7%; color: white;">TOTAL</th>
                 </tr>
             </thead>
             <tbody>';
 
         $contador = 0;
         $tipo_anterior = null;
+        $primera_tropa = true; // Para controlar que la línea aparezca solo una vez
 
         foreach ($personal_servicios as $persona) {
             $bgColor = ($contador % 2 == 0) ? '#f8f9fa' : '#ffffff';
             $tipo_actual = $persona['tipo'] ?? 'TROPA';
 
-            // Separador entre ESPECIALISTAS y TROPA
-            if ($tipo_anterior !== null && $tipo_anterior !== $tipo_actual) {
+            // ✅ SEPARADOR VISUAL entre ESPECIALISTAS y TROPA CON ENCABEZADOS REPETIDOS
+            if ($tipo_anterior === 'ESPECIALISTA' && $tipo_actual === 'TROPA' && $primera_tropa) {
                 $html .= '
-            <tr>
-                <td colspan="' . (($dia_fin - $dia_inicio + 1) + 2) . '" style="background: #2d5016; height: 3px; padding: 0;"></td>
+            <tr style="background: #2d5016; color: white;">
+                <td style="border: 1px solid #ddd; padding: 8px; text-align: left; font-weight: bold; color: white;">NOMBRE</td>';
+
+                // Repetir los encabezados de fechas
+                for ($dia = $dia_inicio; $dia <= $dia_fin; $dia++) {
+                    $fecha_actual = new \DateTime($fecha_inicio_ciclo);
+                    $fecha_actual->modify('+' . ($dia - 1) . ' days');
+
+                    $dia_semana = self::getNombreDiaCorto($fecha_actual->format('N'));
+                    $dia_numero = $fecha_actual->format('d');
+
+                    $html .= '<td style="border: 1px solid #ddd; padding: 6px; text-align: center; font-size: 8px; color: white;">
+                                <div style="font-weight: bold; color: white;">' . strtoupper($dia_semana) . '</div>
+                                <div style="font-size: 11px; font-weight: bold; margin-top: 2px; color: white;">' . $dia_numero . '</div>
+                              </td>';
+                }
+
+                $html .= '
+                <td style="border: 1px solid #ddd; padding: 6px; text-align: center; font-weight: bold; color: white;">TOTAL</td>
             </tr>';
+                $primera_tropa = false;
             }
 
             $tipo_anterior = $tipo_actual;
@@ -801,7 +853,7 @@ class AsignacionController
     }
 
     // ========================================
-    // FUNCIONES AUXILIARES (sin cambios)
+    // FUNCIONES AUXILIARES
     // ========================================
 
     private static function obtenerNumeroTurno($asignacion_actual, $todas_asignaciones)
@@ -829,6 +881,15 @@ class AsignacionController
     private static function getNombreDia($num)
     {
         $dias = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+        return $dias[$num];
+    }
+
+    /**
+     * ✅ MODIFICADA: Obtiene nombre de día COMPLETO en español (en mayúsculas)
+     */
+    private static function getNombreDiaCorto($num)
+    {
+        $dias = ['', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO'];
         return $dias[$num];
     }
 
@@ -883,7 +944,11 @@ class AsignacionController
             'NOC' => '#1a472a',
             'BAN' => '#b8540f',
             'CUA' => '#3d6b1f',
-            'QUA' => '#3d6b1f'
+            'QUA' => '#3d6b1f',
+            'ERI' => '#2d5016',
+            '1ER' => '#1a472a',
+            '2DO' => '#1a472a',
+            '3ER' => '#1a472a'
         ];
 
         return $colores[$servicio_base] ?? '#000000';
