@@ -744,6 +744,62 @@ class AsignacionController
         return $html;
     }
 
+
+
+
+    /**
+     * ✨ NUEVO: Obtiene el historial de todos los ciclos generados
+     */
+    public static function historialCiclosAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $ciclos = AsignacionServicio::obtenerHistorialCiclos();
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Historial obtenido',
+                'ciclos' => $ciclos
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al obtener historial',
+                'detalle' => $e->getMessage(),
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+
+    /**
+     * ✨ NUEVO: Obtiene el historial de todos los ciclos generados
+     */
+    public static function obtenerTodosCiclosAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $ciclos = AsignacionServicio::obtenerHistorialCiclos();
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Historial obtenido',
+                'ciclos' => $ciclos
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al obtener historial',
+                'detalle' => $e->getMessage(),
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
     // ========================================
     // FUNCIONES AUXILIARES (sin cambios)
     // ========================================

@@ -1592,6 +1592,71 @@ class AsignacionServicio extends ActiveRecord
         return "{$dia}/{$mes}/{$anio}";
     }
 
+    /**
+     * ✨ FUNCIÓN CORREGIDA: Obtener historial de todos los ciclos generados
+     * Busca todas las fechas de inicio de ciclos (identificadas porque tienen servicio "Semana")
+     */
+    public static function obtenerHistorialCiclos()
+    {
+        // Estrategia: Buscar todas las asignaciones de SEMANA (que siempre marcan el inicio de un ciclo)
+        // Luego validar que cada ciclo tenga 10 días consecutivos
+
+        $sql = "SELECT DISTINCT 
+                    a.fecha_servicio as fecha_inicio,
+                    DATE_ADD(a.fecha_servicio, INTERVAL 9 DAY) as fecha_fin_esperada,
+                    (SELECT COUNT(DISTINCT a2.fecha_servicio) 
+                     FROM asignaciones_servicio a2 
+                     WHERE a2.fecha_servicio BETWEEN a.fecha_servicio 
+                     AND DATE_ADD(a.fecha_servicio, INTERVAL 9 DAY)) as dias_generados,
+                    (SELECT COUNT(*) 
+                     FROM asignaciones_servicio a3 
+                     WHERE a3.fecha_servicio BETWEEN a.fecha_servicio 
+                     AND DATE_ADD(a.fecha_servicio, INTERVAL 9 DAY)) as total_asignaciones,
+                    (SELECT COUNT(DISTINCT a4.id_personal) 
+                     FROM asignaciones_servicio a4 
+                     WHERE a4.fecha_servicio BETWEEN a.fecha_servicio 
+                     AND DATE_ADD(a.fecha_servicio, INTERVAL 9 DAY)) as personal_involucrado
+                FROM asignaciones_servicio a
+                INNER JOIN tipos_servicio ts ON a.id_tipo_servicio = ts.id_tipo_servicio
+                WHERE ts.nombre = 'Semana'
+                ORDER BY a.fecha_servicio DESC";
+
+        $resultados = self::fetchArray($sql, []);
+
+        $ciclos = [];
+        $hoy = date('Y-m-d');
+
+        foreach ($resultados as $resultado) {
+            // Solo incluir ciclos completos o casi completos (mínimo 8 días para tolerancia)
+            if ($resultado['dias_generados'] >= 8) {
+                // Calcular la fecha fin real
+                $sql_fecha_fin = "SELECT MAX(fecha_servicio) as fecha_fin_real 
+                                 FROM asignaciones_servicio 
+                                 WHERE fecha_servicio BETWEEN :inicio AND :fin";
+
+                $fecha_fin_data = self::fetchFirst($sql_fecha_fin, [
+                    ':inicio' => $resultado['fecha_inicio'],
+                    ':fin' => $resultado['fecha_fin_esperada']
+                ]);
+
+                $fecha_fin = $fecha_fin_data['fecha_fin_real'] ?? $resultado['fecha_fin_esperada'];
+
+                $ciclo = [
+                    'fecha_inicio' => $resultado['fecha_inicio'],
+                    'fecha_fin' => $fecha_fin,
+                    'total_asignaciones' => (int)$resultado['total_asignaciones'],
+                    'personal_involucrado' => (int)$resultado['personal_involucrado'],
+                    'activo' => ($fecha_fin >= $hoy),
+                    'estado' => ($fecha_fin >= $hoy) ? 'ACTIVO' : 'FINALIZADO'
+                ];
+
+                $ciclos[] = $ciclo;
+            }
+        }
+
+        return $ciclos;
+    }
+
     private static function recalcularHistorialPersona($id_personal)
     {
         error_log("🔄 Recalculando historial para persona ID: {$id_personal}");

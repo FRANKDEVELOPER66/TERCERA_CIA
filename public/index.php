@@ -41,6 +41,8 @@ $router->get('/API/asignaciones/verificar-fecha', [AsignacionController::class, 
 // Ruta para obtener la próxima fecha disponible
 $router->get('/API/asignaciones/proxima-fecha', [AsignacionController::class, 'proximaFechaAPI']);
 
+$router->get('/API/asignaciones/obtener-todos-ciclos', [AsignacionController::class, 'obtenerTodosCiclosAPI']);
+
 // Las
 
 

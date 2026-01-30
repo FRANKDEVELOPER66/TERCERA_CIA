@@ -11,22 +11,220 @@ import * as bootstrap from 'bootstrap';
 const fechaInicio = document.getElementById('fechaInicio');
 const btnGenerar = document.getElementById('btnGenerar');
 const btnConsultar = document.getElementById('btnConsultar');
-const btnEliminarSemana = document.getElementById('btnEliminarCiclo'); // ← Cambiado a btnEliminarCiclo
+const btnEliminarSemana = document.getElementById('btnEliminarCiclo');
 const btnExportarPDF = document.getElementById('btnExportarPDF');
 const btnRegresar = document.getElementById('btnRegresar');
 const contenedorResultados = document.getElementById('contenedorResultados');
 const loadingOverlay = document.getElementById('loadingOverlay');
-const infoFecha = document.getElementById('infoFecha');
 
 // Referencias al modal de grupos (con validación)
 const modalElement = document.getElementById('modalSeleccionGrupos');
 const modalSeleccionGrupos = modalElement ? new bootstrap.Modal(modalElement) : null;
 const btnConfirmarGeneracion = document.getElementById('btnConfirmarGeneracion');
-const fechaSemanaModal = document.getElementById('fechaCicloModal'); // ← Cambiado a fechaCicloModal
+const fechaSemanaModal = document.getElementById('fechaCicloModal');
+
+// Referencias al modal de historial
+const modalHistorialElement = document.getElementById('modalHistorialCiclos');
+const modalHistorialCiclos = modalHistorialElement ? new bootstrap.Modal(modalHistorialElement) : null;
+const fabHistorial = document.getElementById('fabHistorial');
+const contenedorHistorial = document.getElementById('contenedorHistorial');
 
 // Estado de la vista
 let estadoVista = 'seleccion';
 let fechaActualInfo = null;
+
+// ========================================
+// ✨ BOTÓN FLOTANTE - MODAL DE HISTORIAL
+// ========================================
+
+// Event listener del botón flotante
+if (fabHistorial) {
+    fabHistorial.addEventListener('click', () => {
+        if (modalHistorialCiclos) {
+            modalHistorialCiclos.show();
+            cargarHistorialCiclos();
+        }
+    });
+}
+
+// ✨ FUNCIÓN: Cargar historial de ciclos
+const cargarHistorialCiclos = async () => {
+    if (!contenedorHistorial) return;
+
+    contenedorHistorial.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-success" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <p class="mt-3">Cargando ciclos...</p>
+        </div>
+    `;
+
+    try {
+        const response = await fetch('/TERCERA_CIA/API/asignaciones/obtener-todos-ciclos');
+
+        // Verificar si la respuesta es JSON
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            throw new Error("La respuesta del servidor no es JSON");
+        }
+
+        const data = await response.json();
+
+        if (data.codigo === 1 && data.ciclos && data.ciclos.length > 0) {
+            mostrarHistorialCiclos(data.ciclos);
+        } else {
+            contenedorHistorial.innerHTML = `
+                <div class="empty-historial">
+                    <i class="bi bi-inbox"></i>
+                    <h4>No hay ciclos generados</h4>
+                    <p>Aún no se han generado ciclos de servicios</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error al cargar historial:', error);
+        contenedorHistorial.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error al cargar el historial</strong>
+                <p>${error.message}</p>
+                <small>Verifique que la ruta <code>/TERCERA_CIA/API/asignaciones/obtener-todos-ciclos</code> esté configurada correctamente</small>
+            </div>
+        `;
+    }
+};
+
+// ✨ FUNCIÓN: Mostrar historial en tabla
+const mostrarHistorialCiclos = (ciclos) => {
+    if (!contenedorHistorial) return;
+
+    let html = `
+        <table class="tabla-historial table table-hover">
+            <thead>
+                <tr>
+                    <th style="width: 80px;">#</th>
+                    <th>Periodo del Ciclo</th>
+                    <th style="width: 150px;">Estado</th>
+                    <th style="width: 120px;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    ciclos.forEach((ciclo, index) => {
+        const numero = String(index + 1).padStart(2, '0');
+        const estadoClase = ciclo.activo ? 'activo' : 'finalizado';
+        const estadoTexto = ciclo.activo ? 'ACTIVO' : 'FINALIZADO';
+
+        html += `
+            <tr>
+                <td class="numero-ciclo">${numero}</td>
+                <td class="fechas-ciclo">
+                    <strong>Ciclo del ${formatearFechaCompleta(ciclo.fecha_inicio)} al ${formatearFechaCompleta(ciclo.fecha_fin)}</strong>
+                    <br>
+                    <small class="text-muted">
+                        <i class="bi bi-people"></i> ${ciclo.personal_involucrado || 0} personas • 
+                        <i class="bi bi-list-check"></i> ${ciclo.total_asignaciones || 0} asignaciones
+                    </small>
+                </td>
+                <td>
+                    <span class="estado-badge ${estadoClase}">
+                        ${estadoTexto}
+                    </span>
+                </td>
+                <td>
+                    <button 
+                        class="btn btn-consultar-ciclo btn-sm"
+                        onclick="consultarCicloDesdeHistorial('${ciclo.fecha_inicio}')"
+                    >
+                        <i class="bi bi-search"></i> Consultar
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += `
+            </tbody>
+        </table>
+    `;
+
+    contenedorHistorial.innerHTML = html;
+};
+
+// ✨ FUNCIÓN: Consultar ciclo desde historial (GLOBAL)
+window.consultarCicloDesdeHistorial = async (fechaInicioCiclo) => {
+    // Cerrar modal
+    if (modalHistorialCiclos) {
+        modalHistorialCiclos.hide();
+    }
+
+    // Establecer fecha en el input
+    if (fechaInicio) {
+        fechaInicio.value = fechaInicioCiclo;
+    }
+
+    // Mostrar loading
+    mostrarLoading(true);
+
+    try {
+        // Consultar servicios
+        const url = `/TERCERA_CIA/API/asignaciones/obtener?fecha_inicio=${fechaInicioCiclo}`;
+        const respuesta = await fetch(url);
+        const data = await respuesta.json();
+
+        mostrarLoading(false);
+
+        if (data.codigo === 1 && data.datos.length > 0) {
+            // Mostrar servicios
+            mostrarServicios(data.datos, fechaInicioCiclo);
+            gestionarBotones('consultando');
+
+            // Toast de confirmación
+            Toast.fire({
+                icon: 'success',
+                title: '✅ Ciclo cargado exitosamente',
+                timer: 2000
+            });
+
+            // Scroll suave hacia arriba
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        } else {
+            Swal.fire({
+                icon: 'warning',
+                title: 'No se encontraron datos',
+                text: 'Este ciclo no tiene servicios disponibles',
+                confirmButtonColor: '#2d5016'
+            });
+        }
+    } catch (error) {
+        mostrarLoading(false);
+        console.error('Error:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'Error',
+            text: 'Error al cargar el ciclo'
+        });
+    }
+};
+
+// ✨ FUNCIÓN: Formatear fecha completa
+const formatearFechaCompleta = (fecha) => {
+    const date = new Date(fecha + 'T00:00:00');
+    const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+    const diaSemana = dias[date.getDay()];
+    const dia = date.getDate();
+    const mes = meses[date.getMonth()];
+    const anio = date.getFullYear();
+
+    return `${diaSemana}, ${dia} de ${mes} de ${anio}`;
+};
 
 // ========================================
 // ✨ FUNCIONES DE PRESETS DE ROTACIÓN
@@ -130,20 +328,35 @@ const cargarProximaFechaDisponible = async () => {
             // Establecer la fecha en el input
             fechaInicio.value = info.proxima_fecha;
 
-            // Mostrar información
+            // ✨ MODIFICADO: Mostrar con SweetAlert en lugar de alerta HTML
             if (info.tiene_ciclos) {
-                mostrarInfoFecha(
-                    'info',
-                    `Último ciclo: ${formatearFecha(info.ultimo_ciclo_inicio)} - ${formatearFecha(info.ultimo_ciclo_fin)}<br>` +
-                    `<strong>Próxima fecha sugerida: ${formatearFecha(info.proxima_fecha)}</strong>`,
-                    true
-                );
+                Swal.fire({
+                    icon: 'info',
+                    title: 'Información del Sistema',
+                    html: `
+                        <div style="text-align: left;">
+                            <p><i class="bi bi-calendar-check"></i> <strong>Último ciclo generado:</strong></p>
+                            <p style="margin-left: 20px;">Del ${formatearFecha(info.ultimo_ciclo_inicio)} al ${formatearFecha(info.ultimo_ciclo_fin)}</p>
+                            <hr>
+                            <p><i class="bi bi-calendar-plus"></i> <strong>Próxima fecha sugerida:</strong></p>
+                            <p style="margin-left: 20px; color: #2d5016; font-size: 1.2em; font-weight: bold;">${formatearFecha(info.proxima_fecha)}</p>
+                        </div>
+                    `,
+                    confirmButtonText: 'Entendido',
+                    confirmButtonColor: '#2d5016',
+                    timer: 8000,
+                    timerProgressBar: true
+                });
             } else {
-                mostrarInfoFecha(
-                    'success',
-                    'No hay ciclos generados. Puede comenzar desde hoy.',
-                    true
-                );
+                Swal.fire({
+                    icon: 'success',
+                    title: '¡Sistema Listo!',
+                    text: 'No hay ciclos generados. Puede comenzar desde hoy.',
+                    confirmButtonText: 'Comenzar',
+                    confirmButtonColor: '#2d5016',
+                    timer: 5000,
+                    timerProgressBar: true
+                });
             }
 
             // Verificar si hay ciclo en la fecha cargada
@@ -156,54 +369,7 @@ const cargarProximaFechaDisponible = async () => {
 };
 
 // ========================================
-// ✨ NUEVA FUNCIÓN: Mostrar información de fecha
-// ========================================
-
-const mostrarInfoFecha = (tipo, mensaje, permanente = false) => {
-    if (!infoFecha) return;
-
-    infoFecha.style.display = 'block';
-    infoFecha.className = 'alert';
-
-    const iconos = {
-        'info': '<i class="bi bi-info-circle-fill"></i>',
-        'warning': '<i class="bi bi-exclamation-triangle-fill"></i>',
-        'success': '<i class="bi bi-check-circle-fill"></i>',
-        'danger': '<i class="bi bi-x-circle-fill"></i>'
-    };
-
-    switch (tipo) {
-        case 'info':
-            infoFecha.classList.add('alert-info');
-            break;
-        case 'warning':
-            infoFecha.classList.add('alert-warning');
-            break;
-        case 'success':
-            infoFecha.classList.add('alert-success');
-            break;
-        case 'danger':
-            infoFecha.classList.add('alert-danger');
-            break;
-    }
-
-    infoFecha.innerHTML = `${iconos[tipo]} ${mensaje}`;
-
-    if (!permanente) {
-        setTimeout(() => {
-            infoFecha.style.display = 'none';
-        }, 8000);
-    }
-};
-
-const ocultarInfoFecha = () => {
-    if (infoFecha) {
-        infoFecha.style.display = 'none';
-    }
-};
-
-// ========================================
-// FUNCIONES BÁSICAS
+// ✅ FUNCIONES BÁSICAS
 // ========================================
 
 const mostrarLoading = (mostrar) => {
@@ -290,10 +456,10 @@ const verificarDisponibilidadFecha = async (fecha) => {
 };
 
 // ========================================
-// ✨ MODIFICADO: Manejo de cambio de fecha con validación inteligente
+// ✨ MODIFICADO: Manejo de cambio de fecha con SweetAlert
 // ========================================
 
-const manejarCambioFecha = async () => {
+const manejarCambioFecha = async (mostrarAlertas = true) => {
     if (!fechaInicio) {
         console.warn('⚠️ Input de fecha no encontrado');
         return;
@@ -303,7 +469,6 @@ const manejarCambioFecha = async () => {
 
     if (!fecha) {
         gestionarBotones('inicial');
-        ocultarInfoFecha();
         return;
     }
 
@@ -320,16 +485,38 @@ const manejarCambioFecha = async () => {
     fechaActualInfo = disponibilidad;
 
     if (!disponibilidad.disponible) {
-        // ✨ Fecha está dentro de un ciclo existente
         mostrarLoading(false);
 
-        mostrarInfoFecha(
-            'warning',
-            `⚠️ <strong>Esta fecha ya está generada.</strong><br>` +
-            `${disponibilidad.mensaje}<br>` +
-            `<strong>Próxima fecha disponible: ${formatearFecha(disponibilidad.proxima_fecha_disponible)}</strong>`,
-            true
-        );
+        // Solo mostrar SweetAlert si mostrarAlertas es true
+        if (mostrarAlertas) {
+            await Swal.fire({
+                icon: 'warning',
+                title: '⚠️ Fecha No Disponible',
+                html: `
+                    <div style="text-align: left;">
+                        <p><i class="bi bi-exclamation-triangle"></i> <strong>${disponibilidad.mensaje}</strong></p>
+                        <hr style="margin: 1.5rem 0;">
+                        <p><i class="bi bi-calendar-x"></i> Ciclo existente:</p>
+                        <p style="margin-left: 20px;">Del ${formatearFecha(disponibilidad.ciclo_inicio)} al ${formatearFecha(disponibilidad.ciclo_fin)}</p>
+                        <hr style="margin: 1.5rem 0;">
+                        <p><i class="bi bi-calendar-check"></i> <strong>Próxima fecha disponible:</strong></p>
+                        <p style="margin-left: 20px; color: #2d5016; font-size: 1.2em; font-weight: bold;">
+                            ${formatearFecha(disponibilidad.proxima_fecha_disponible)}
+                        </p>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-calendar-plus"></i> Ir a Próxima Fecha',
+                cancelButtonText: 'Cerrar',
+                confirmButtonColor: '#2d5016',
+                cancelButtonColor: '#6c757d',
+                reverseButtons: true
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    cargarFechaSugerida(disponibilidad.proxima_fecha_disponible);
+                }
+            });
+        }
 
         gestionarBotones('fecha_ocupada');
 
@@ -340,9 +527,6 @@ const manejarCambioFecha = async () => {
                     <h3>Fecha no disponible</h3>
                     <p>Esta fecha pertenece a un ciclo ya generado</p>
                     <p><strong>Ciclo existente:</strong> ${formatearFecha(disponibilidad.ciclo_inicio)} - ${formatearFecha(disponibilidad.ciclo_fin)}</p>
-                    <button class="btn btn-primary mt-3" onclick="cargarFechaSugerida('${disponibilidad.proxima_fecha_disponible}')">
-                        <i class="bi bi-calendar-plus"></i> Ir a próxima fecha disponible
-                    </button>
                 </div>
             `;
         }
@@ -356,27 +540,30 @@ const manejarCambioFecha = async () => {
 
     if (existe) {
         gestionarBotones('semana_existente');
-        mostrarInfoFecha(
-            'info',
-            `📋 Este ciclo ya tiene servicios generados. Puede consultarlos o eliminarlos.`,
-            false
-        );
+        if (mostrarAlertas) {
+            Toast.fire({
+                icon: 'info',
+                title: '📋 Este ciclo ya tiene servicios generados',
+                timer: 3000
+            });
+        }
     } else {
         gestionarBotones('semana_nueva');
 
-        if (disponibilidad.proxima_fecha_disponible === fecha) {
-            mostrarInfoFecha(
-                'success',
-                `✅ Fecha disponible. Esta es la próxima fecha sugerida para generar el ciclo.`,
-                false
-            );
-        } else {
-            mostrarInfoFecha(
-                'info',
-                `📅 Fecha disponible. Puede generar el ciclo desde aquí.<br>` +
-                `<small>Próxima fecha sugerida: ${formatearFecha(disponibilidad.proxima_fecha_disponible)}</small>`,
-                false
-            );
+        if (mostrarAlertas) {
+            if (disponibilidad.proxima_fecha_disponible === fecha) {
+                Toast.fire({
+                    icon: 'success',
+                    title: '✅ Fecha disponible - Próxima sugerida',
+                    timer: 3000
+                });
+            } else {
+                Toast.fire({
+                    icon: 'info',
+                    title: `📅 Fecha disponible`,
+                    timer: 3000
+                });
+            }
         }
     }
 
@@ -392,27 +579,79 @@ const manejarCambioFecha = async () => {
 };
 
 // ========================================
-// ✨ NUEVA FUNCIÓN: Cargar fecha sugerida
+// ✨ FUNCIÓN: Cargar fecha sugerida
 // ========================================
 
-window.cargarFechaSugerida = (fecha) => {
+const cargarFechaSugerida = (fecha) => {
     if (fechaInicio) {
         fechaInicio.value = fecha;
         manejarCambioFecha();
+
+        Toast.fire({
+            icon: 'success',
+            title: '✅ Fecha actualizada',
+            timer: 2000
+        });
     }
 };
 
-const regresarASeleccion = () => {
+// Hacer la función global para que pueda ser llamada desde HTML
+window.cargarFechaSugerida = cargarFechaSugerida;
+
+const regresarASeleccion = async () => {
+    // Limpiar vista
     if (contenedorResultados) {
         contenedorResultados.innerHTML = `
             <div class="empty-state">
                 <i class="bi bi-calendar-check"></i>
-                <h3>Selecciona un ciclo</h3>
-                <p>Elige una fecha y genera o consulta los servicios del ciclo de 10 días</p>
+                <h3>Selecciona una fecha de inicio</h3>
+                <p>Elige cualquier día y genera un ciclo de 10 días de servicios</p>
             </div>
         `;
     }
-    manejarCambioFecha();
+
+    // Cargar próxima fecha disponible automáticamente
+    try {
+        const response = await fetch('/TERCERA_CIA/API/asignaciones/proxima-fecha');
+        const data = await response.json();
+
+        if (data.codigo === 1 && data.data) {
+            const info = data.data;
+
+            // Establecer la fecha en el input sin mostrar alertas
+            if (fechaInicio) {
+                fechaInicio.value = info.proxima_fecha;
+            }
+
+            // Verificar si hay ciclo en esta fecha (sin mostrar alertas)
+            const disponibilidad = await verificarDisponibilidadFecha(info.proxima_fecha);
+
+            if (disponibilidad) {
+                fechaActualInfo = disponibilidad;
+
+                // Verificar si tiene datos
+                const existe = await verificarSemanaExistente(info.proxima_fecha);
+
+                if (existe) {
+                    gestionarBotones('semana_existente');
+                } else {
+                    gestionarBotones('semana_nueva');
+                }
+            } else {
+                gestionarBotones('inicial');
+            }
+
+            // Toast discreto
+            Toast.fire({
+                icon: 'info',
+                title: 'Seleccione una Fecha',
+                timer: 1500
+            });
+        }
+    } catch (error) {
+        console.error('Error al regresar:', error);
+        gestionarBotones('inicial');
+    }
 };
 
 // ========================================
@@ -637,7 +876,6 @@ const generarServiciosConGrupos = async (fecha, grupos) => {
 
                 mostrarServicios(datosGenerados, fecha);
                 gestionarBotones('generado_nuevo');
-                ocultarInfoFecha();
             } else {
                 Swal.fire({
                     icon: 'warning',
@@ -698,7 +936,6 @@ const consultarServicios = async () => {
         if (data.codigo === 1 && data.datos.length > 0) {
             mostrarServicios(data.datos, fecha);
             gestionarBotones('consultando');
-            ocultarInfoFecha();
         } else {
             contenedorResultados.innerHTML = `
                 <div class="empty-state">
@@ -737,7 +974,7 @@ const consultarServiciosSinUI = async (fecha) => {
 };
 
 // ========================================
-// MOSTRAR SERVICIOS (igual que antes)
+// MOSTRAR SERVICIOS
 // ========================================
 
 const mostrarServicios = (asignaciones, fechaInicio) => {

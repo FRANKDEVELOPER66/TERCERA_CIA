@@ -1,4 +1,156 @@
 <style>
+    /* ========================================
+       ✨ BOTÓN FLOTANTE HORIZONTAL
+       ======================================== */
+    .fab-button {
+        position: fixed;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        min-width: 300px;
+        height: 60px;
+        background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
+        border-radius: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        box-shadow: 0 8px 25px rgba(45, 80, 22, 0.4);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        z-index: 1000;
+        border: none;
+        color: white;
+        font-size: 1rem;
+        font-weight: 600;
+        padding: 0 30px;
+    }
+
+    .fab-button:hover {
+        transform: translateX(-50%) translateY(-5px);
+        box-shadow: 0 12px 35px rgba(45, 80, 22, 0.6);
+        background: linear-gradient(135deg, #3d6b1f 0%, #4a8025 100%);
+    }
+
+    .fab-button:active {
+        transform: translateX(-50%) translateY(-2px);
+    }
+
+    .fab-button i {
+        font-size: 1.5rem;
+        animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+
+        0%,
+        100% {
+            transform: scale(1);
+        }
+
+        50% {
+            transform: scale(1.1);
+        }
+    }
+
+    /* ========================================
+       ✨ TABLA DE HISTORIAL DE CICLOS
+       ======================================== */
+    .tabla-historial {
+        width: 100%;
+        margin-top: 1rem;
+    }
+
+    .tabla-historial thead {
+        background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%);
+        color: white;
+    }
+
+    .tabla-historial th {
+        padding: 15px;
+        font-weight: 600;
+        text-align: center;
+        border: none;
+    }
+
+    .tabla-historial tbody tr {
+        transition: all 0.3s ease;
+        border-bottom: 1px solid #e2e8f0;
+    }
+
+    .tabla-historial tbody tr:hover {
+        background: #f8f9fa;
+        transform: scale(1.01);
+    }
+
+    .tabla-historial td {
+        padding: 15px;
+        vertical-align: middle;
+        text-align: center;
+    }
+
+    .numero-ciclo {
+        font-weight: 700;
+        font-size: 1.2rem;
+        color: #2d5016;
+        width: 80px;
+    }
+
+    .fechas-ciclo {
+        font-size: 1rem;
+        color: #334155;
+    }
+
+    .estado-badge {
+        padding: 6px 15px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        display: inline-block;
+    }
+
+    .estado-badge.activo {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: white;
+    }
+
+    .estado-badge.finalizado {
+        background: #e2e8f0;
+        color: #64748b;
+    }
+
+    .btn-consultar-ciclo {
+        background: linear-gradient(135deg, #4c84ff 0%, #667eea 100%);
+        border: none;
+        color: white;
+        padding: 8px 20px;
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        box-shadow: 0 3px 10px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-consultar-ciclo:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(76, 132, 255, 0.4);
+        background: linear-gradient(135deg, #667eea 0%, #4c84ff 100%);
+    }
+
+    .empty-historial {
+        text-align: center;
+        padding: 3rem;
+        color: #94a3b8;
+    }
+
+    .empty-historial i {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.3;
+    }
+
+    /* ========================================
+       ESTILOS EXISTENTES
+       ======================================== */
     .calendar-widget {
         background: white;
         border-radius: 20px;
@@ -385,9 +537,6 @@
                             class="form-control form-control-lg"
                             placeholder="Seleccione una fecha">
 
-                        <!-- ✨ NUEVO: Información dinámica de la fecha -->
-                        <div id="infoFecha" class="alert mt-3" style="display: none;" role="alert"></div>
-
                         <small class="text-muted">
                             <i class="bi bi-info-circle"></i>
                             Seleccione cualquier fecha disponible para iniciar el ciclo de 10 días
@@ -433,6 +582,42 @@
                     <i class="bi bi-calendar-check"></i>
                     <h3>Selecciona una fecha de inicio</h3>
                     <p>Elige cualquier día y genera un ciclo de 10 días de servicios</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ✨ BOTÓN FLOTANTE HORIZONTAL -->
+    <button class="fab-button" id="fabHistorial">
+        <i class="bi bi-clock-history"></i>
+        <span>Consultar Ciclos Generados</span>
+    </button>
+
+    <!-- ✨ MODAL DE HISTORIAL CON TABLA -->
+    <div class="modal fade" id="modalHistorialCiclos" tabindex="-1" aria-labelledby="modalHistorialCiclosLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #2d5016 0%, #3d6b1f 100%); color: white;">
+                    <h5 class="modal-title" id="modalHistorialCiclosLabel">
+                        <i class="bi bi-clock-history"></i> Historial de Ciclos Generados
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body" id="contenedorHistorial">
+                    <!-- Se llenará dinámicamente -->
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-success" role="status">
+                            <span class="visually-hidden">Cargando...</span>
+                        </div>
+                        <p class="mt-3">Cargando ciclos...</p>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-circle"></i> Cerrar
+                    </button>
                 </div>
             </div>
         </div>
