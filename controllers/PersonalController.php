@@ -174,4 +174,32 @@ class PersonalController
             ], JSON_UNESCAPED_UNICODE);
         }
     }
+
+    /**
+     * 🆕 API: Obtener personal activo
+     */
+    public static function obtenerActivosAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $personal = Personal::obtenerPersonalActivo();
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Personal activo obtenido',
+                'personal' => $personal
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en obtenerActivosAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al obtener personal',
+                'detalle' => $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
 }

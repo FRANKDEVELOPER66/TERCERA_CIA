@@ -2,6 +2,8 @@
 
 namespace Model;
 
+use Model\ComisionOficial;
+
 class AsignacionServicio extends ActiveRecord
 {
     private static $grupos_disponibles_actuales = [];
@@ -66,8 +68,517 @@ class AsignacionServicio extends ActiveRecord
         return $filtro;
     }
 
+    // ========================================
+    // 🆕 SISTEMA DE COMISIONES
+    // ========================================
+
     /**
-     * ✅ MODIFICADO: Ahora genera 10 días consecutivos
+     * 🆕 Registra una comisión oficial y busca reemplazos automáticamente
+     */
+    public static function registrarComision($datos)
+    {
+        try {
+            self::beginTransaction();
+
+            error_log("🔷 === INICIANDO REGISTRO DE COMISIÓN ===");
+
+            // 1. Validar datos básicos
+            if (empty($datos['numero_oficio'])) {
+                throw new \Exception('El número de oficio es obligatorio');
+            }
+
+            if (empty($datos['id_personal'])) {
+                throw new \Exception('El ID de personal es obligatorio');
+            }
+
+            error_log("📋 Datos recibidos: " . json_encode($datos));
+
+            // 2. Verificar que no exista oficio duplicado
+            $existe_oficio = self::fetchFirst(
+                "SELECT id_comision FROM comisiones_oficiales WHERE numero_oficio = :oficio",
+                [':oficio' => $datos['numero_oficio']]
+            );
+
+            if ($existe_oficio) {
+                throw new \Exception('Ya existe una comisión con este número de oficio: ' . $datos['numero_oficio']);
+            }
+
+            // 3. Crear registro de comisión usando el modelo
+            error_log("💾 Creando registro de comisión...");
+
+            $comision = new \Model\ComisionOficial([
+                'id_personal' => $datos['id_personal'],
+                'fecha_inicio' => $datos['fecha_inicio'],
+                'fecha_fin' => $datos['fecha_fin'],
+                'destino' => $datos['destino'] ?? 'Ciudad Capital',
+                'numero_oficio' => $datos['numero_oficio'],
+                'motivo' => $datos['motivo'] ?? '',
+                'created_by' => $datos['created_by']
+            ]);
+
+            $resultado = $comision->crear();
+
+            error_log("📋 Resultado de crear(): " . json_encode($resultado));
+
+            if (!$resultado || !isset($resultado['id']) || !$resultado['id']) {
+                throw new \Exception('No se pudo crear el registro de comisión - Sin ID retornado');
+            }
+
+            $id_comision = $resultado['id'];
+            error_log("✅ Comisión registrada con ID: {$id_comision}");
+
+            // 4. Buscar servicios afectados
+            error_log("🔍 Buscando servicios afectados...");
+
+            $servicios_afectados = self::fetchArray(
+                "SELECT a.*, ts.nombre as nombre_servicio, ts.tipo_personal
+                 FROM asignaciones_servicio a
+                 INNER JOIN tipos_servicio ts ON a.id_tipo_servicio = ts.id_tipo_servicio
+                 WHERE a.id_personal = :id_personal
+                 AND a.fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+                 AND a.estado = 'PROGRAMADO'
+                 ORDER BY a.fecha_servicio ASC",
+                [
+                    ':id_personal' => $datos['id_personal'],
+                    ':fecha_inicio' => $datos['fecha_inicio'],
+                    ':fecha_fin' => $datos['fecha_fin']
+                ]
+            );
+
+            error_log("📊 Servicios afectados encontrados: " . count($servicios_afectados));
+
+            $reemplazos_realizados = [];
+            $servicios_sin_reemplazo = [];
+
+            // 5. Procesar cada servicio afectado
+            // 5. Procesar cada servicio afectado
+            foreach ($servicios_afectados as $servicio) {
+                error_log("⚙️ === PROCESANDO SERVICIO ===");
+                error_log("📋 Servicio: {$servicio['nombre_servicio']}");
+                error_log("📅 Fecha: {$servicio['fecha_servicio']}");
+                error_log("🆔 ID Asignación: {$servicio['id_asignacion']}");
+                error_log("🎯 Tipo personal: " . ($servicio['tipo_personal'] ?? 'NULL'));
+
+                // ✅ PASO 1: Marcar servicio original como REEMPLAZADO
+                // Usar una verificación más robusta que no dependa de ejecutarQuery
+                $actualizado = self::ejecutarQuery(
+                    "UPDATE asignaciones_servicio 
+     SET estado = 'REEMPLAZADO', 
+         id_comision = :id_comision,
+         observaciones_comision = :obs
+     WHERE id_asignacion = :id_asignacion
+     AND estado = 'PROGRAMADO'",
+                    [
+                        ':id_comision' => $id_comision,
+                        ':obs' => "Comisión a {$datos['destino']} - Oficio {$datos['numero_oficio']}",
+                        ':id_asignacion' => $servicio['id_asignacion']
+                    ]
+                );
+
+                if ($actualizado && $actualizado['resultado']) {
+                    error_log("✅ Servicio marcado como REEMPLAZADO (filas: {$actualizado['filas_afectadas']})");
+                } else {
+                    error_log("⚠️ UPDATE no confirmado, continuando con búsqueda de reemplazo");
+                }
+
+                // ✅ PASO 2: Buscar reemplazo (INDEPENDIENTE del resultado del UPDATE)
+                error_log("🔍 Buscando reemplazo para: {$servicio['nombre_servicio']}");
+                $reemplazo = self::buscarReemplazoInteligente($servicio, $datos['id_personal']);
+
+                if ($reemplazo) {
+                    error_log("✅ Reemplazo encontrado: {$reemplazo['nombre_completo']} (ID: {$reemplazo['id_personal']})");
+
+                    // Verificar duplicado
+                    $existe_reemplazo = self::fetchFirst(
+                        "SELECT id_asignacion 
+             FROM asignaciones_servicio 
+             WHERE id_personal = :id_personal
+             AND fecha_servicio = :fecha
+             AND id_tipo_servicio = :tipo
+             AND estado = 'PROGRAMADO'",
+                        [
+                            ':id_personal' => $reemplazo['id_personal'],
+                            ':fecha' => $servicio['fecha_servicio'],
+                            ':tipo' => $servicio['id_tipo_servicio']
+                        ]
+                    );
+
+                    if ($existe_reemplazo) {
+                        error_log("⚠️ Ya existe un reemplazo para este servicio, saltando...");
+                        $servicios_sin_reemplazo[] = [
+                            'fecha' => $servicio['fecha_servicio'],
+                            'servicio' => $servicio['nombre_servicio']
+                        ];
+                        continue;
+                    }
+
+                    // Crear nueva asignación de reemplazo
+                    $nueva_asignacion = new self([
+                        'id_personal' => $reemplazo['id_personal'],
+                        'id_tipo_servicio' => $servicio['id_tipo_servicio'],
+                        'id_oficial_encargado' => $servicio['id_oficial_encargado'],
+                        'fecha_servicio' => $servicio['fecha_servicio'],
+                        'hora_inicio' => $servicio['hora_inicio'],
+                        'hora_fin' => $servicio['hora_fin'],
+                        'estado' => 'PROGRAMADO',
+                        'observaciones' => "REEMPLAZO - Oficio {$datos['numero_oficio']}",
+                        'created_by' => $datos['created_by']
+                    ]);
+
+                    $resultado_asignacion = $nueva_asignacion->crear();
+
+                    if ($resultado_asignacion && $resultado_asignacion['resultado']) {
+                        // Registrar en tabla de reemplazos
+                        self::ejecutarQuery(
+                            "INSERT INTO reemplazos_servicio 
+                 (id_asignacion_original, id_personal_original, id_personal_reemplazo, 
+                  id_comision, fecha_servicio, id_tipo_servicio, nombre_servicio,
+                  servicios_acumulados_reemplazo, veces_reemplazo_ciclo, realizado_por)
+                 VALUES (:id_orig, :pers_orig, :pers_reempl, :comision, :fecha, :tipo, :nombre,
+                         :acum, :veces, :user)",
+                            [
+                                ':id_orig' => $servicio['id_asignacion'],
+                                ':pers_orig' => $datos['id_personal'],
+                                ':pers_reempl' => $reemplazo['id_personal'],
+                                ':comision' => $id_comision,
+                                ':fecha' => $servicio['fecha_servicio'],
+                                ':tipo' => $servicio['id_tipo_servicio'],
+                                ':nombre' => $servicio['nombre_servicio'],
+                                ':acum' => $reemplazo['servicios_en_ciclo'] ?? 0,
+                                ':veces' => $reemplazo['veces_reemplazo'] ?? 0,
+                                ':user' => $datos['created_by']
+                            ]
+                        );
+
+                        // Actualizar historial
+                        self::actualizarHistorial(
+                            $reemplazo['id_personal'],
+                            $servicio['id_tipo_servicio'],
+                            $servicio['fecha_servicio']
+                        );
+
+                        $reemplazos_realizados[] = [
+                            'fecha' => $servicio['fecha_servicio'],
+                            'servicio' => $servicio['nombre_servicio'],
+                            'reemplazo' => $reemplazo['nombre_completo'],
+                            'grado' => $reemplazo['grado']
+                        ];
+                    } else {
+                        error_log("❌ Error al crear asignación de reemplazo");
+                        $servicios_sin_reemplazo[] = [
+                            'fecha' => $servicio['fecha_servicio'],
+                            'servicio' => $servicio['nombre_servicio']
+                        ];
+                    }
+                } else {
+                    error_log("⚠️ No se encontró reemplazo disponible");
+                    $servicios_sin_reemplazo[] = [
+                        'fecha' => $servicio['fecha_servicio'],
+                        'servicio' => $servicio['nombre_servicio']
+                    ];
+                }
+            }
+
+            // 6. Calcular días de comisión
+            $fecha_inicio_obj = new \DateTime($datos['fecha_inicio']);
+            $fecha_fin_obj = new \DateTime($datos['fecha_fin']);
+            $dias_comision = $fecha_inicio_obj->diff($fecha_fin_obj)->days + 1;
+
+            error_log("📊 Resumen: {$dias_comision} días, " . count($reemplazos_realizados) . " reemplazos, " . count($servicios_sin_reemplazo) . " sin reemplazo");
+
+            self::commit();
+            error_log("✅ Transacción completada exitosamente");
+
+            return [
+                'exito' => true,
+                'mensaje' => 'Comisión procesada exitosamente',
+                'data' => [
+                    'id_comision' => $id_comision,
+                    'numero_oficio' => $datos['numero_oficio'],
+                    'dias_comision' => $dias_comision,
+                    'servicios_afectados' => count($servicios_afectados),
+                    'reemplazos_realizados' => count($reemplazos_realizados),
+                    'servicios_sin_reemplazo' => count($servicios_sin_reemplazo),
+                    'detalles_reemplazos' => $reemplazos_realizados,
+                    'detalles_sin_reemplazo' => $servicios_sin_reemplazo
+                ]
+            ];
+        } catch (\Exception $e) {
+            self::rollback();
+            error_log("❌ ERROR en registrarComision: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
+
+            return [
+                'exito' => false,
+                'mensaje' => 'Error al procesar comisión: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * 🧠 ALGORITMO DE REEMPLAZO INTELIGENTE - ✅ CORREGIDO
+     * Busca el mejor candidato siguiendo reglas estrictas de equidad
+     */
+    private static function buscarReemplazoInteligente($servicio_afectado, $id_comisionado)
+    {
+        $fecha_servicio = $servicio_afectado['fecha_servicio'];
+        $id_tipo_servicio = $servicio_afectado['id_tipo_servicio'];
+        $nombre_servicio = $servicio_afectado['nombre_servicio'];
+        $tipo_personal_db = $servicio_afectado['tipo_personal'] ?? null;
+
+        error_log("🔍 === BÚSQUEDA DE REEMPLAZO ===");
+        error_log("📋 Servicio: {$nombre_servicio}");
+        error_log("📅 Fecha: {$fecha_servicio}");
+        error_log("🎯 Tipo personal DB: {$tipo_personal_db}");
+        error_log("👤 ID Comisionado: {$id_comisionado}");
+
+        // Determinar tipo de búsqueda
+        $tipo_busqueda = null;
+        switch ($nombre_servicio) {
+            case 'TACTICO':
+                $tipo_busqueda = 'ESPECIALISTA';
+                break;
+            case 'TACTICO TROPA':
+                $tipo_busqueda = 'TROPA';
+                break;
+            case 'RECONOCIMIENTO':
+                $tipo_busqueda = 'ESPECIALISTA';
+                break;
+            case 'SERVICIO NOCTURNO':
+            case 'CUARTELERO':
+            case 'BANDERÍN':
+            case 'Semana':
+                $tipo_busqueda = 'TROPA';
+                break;
+            default:
+                if ($tipo_personal_db === 'AMBOS' || $tipo_personal_db === null) {
+                    $tipo_busqueda = 'TROPA';
+                } else {
+                    $tipo_busqueda = $tipo_personal_db;
+                }
+                break;
+        }
+
+        error_log("🎯 Tipo de búsqueda determinado: {$tipo_busqueda}");
+
+        $grados_permitidos = self::obtenerGradosPermitidos($nombre_servicio, $tipo_busqueda);
+        error_log("📋 Grados permitidos IDs: " . json_encode($grados_permitidos));
+
+        $fecha_ayer = date('Y-m-d', strtotime($fecha_servicio . ' -1 day'));
+        $fecha_manana = date('Y-m-d', strtotime($fecha_servicio . ' +1 day'));
+
+        // Calcular rango del ciclo
+        $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
+                     FROM asignaciones_servicio 
+                     WHERE fecha_servicio <= :fecha_ciclo_calc 
+                     AND DATEDIFF(:fecha_ciclo_calc2, fecha_servicio) < 10";
+
+        $ciclo = self::fetchFirst($sql_inicio_ciclo, [
+            ':fecha_ciclo_calc' => $fecha_servicio,
+            ':fecha_ciclo_calc2' => $fecha_servicio
+        ]);
+        $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha_servicio;
+        $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
+
+        error_log("📅 Rango ciclo: {$fecha_inicio_ciclo} a {$fecha_fin_ciclo}");
+
+        // Construir params con nombres únicos
+        $params = [
+            ':fecha_base'          => $fecha_servicio,
+            ':fecha_ayer'          => $fecha_ayer,
+            ':fecha_manana'        => $fecha_manana,
+            ':tipo'                => $tipo_busqueda,
+            ':id_comisionado'      => $id_comisionado,
+            ':fecha_inicio_ciclo'  => $fecha_inicio_ciclo,
+            ':fecha_fin_ciclo'     => $fecha_fin_ciclo,
+            // Duplicados con nombres únicos para cada uso en subqueries
+            ':fecha_sub1'          => $fecha_servicio,
+            ':fecha_sub2_ayer'     => $fecha_ayer,
+            ':fecha_sub3'          => $fecha_servicio,
+            ':fecha_sub4'          => $fecha_servicio,
+            ':fecha_sub5_inicio'   => $fecha_inicio_ciclo,
+            ':fecha_sub5_fin'      => $fecha_fin_ciclo,
+            ':fecha_sub6_inicio'   => $fecha_inicio_ciclo,
+            ':fecha_sub6_fin'      => $fecha_fin_ciclo,
+            ':fecha_descanso'      => $fecha_servicio,
+        ];
+
+        // Filtro grados
+        $filtro_grados = '';
+        if (!empty($grados_permitidos)) {
+            $placeholders_grados = [];
+            foreach ($grados_permitidos as $idx => $id_grado) {
+                $key = ":grado_{$idx}";
+                $placeholders_grados[] = $key;
+                $params[$key] = $id_grado;
+            }
+            $filtro_grados = "AND p.id_grado IN (" . implode(',', $placeholders_grados) . ")";
+            error_log("🎓 Filtro grados: {$filtro_grados}");
+        }
+
+        // Filtro grupos
+        $filtro_grupos = self::construirFiltroGrupos($params);
+
+        // CONSULTA PRINCIPAL - todos los placeholders únicos
+        $sql = "SELECT 
+        p.id_personal,
+        CONCAT(p.nombres, ' ', p.apellidos) as nombre_completo,
+        g.nombre as grado,
+        p.tipo as tipo_personal,
+        
+        (SELECT COUNT(*) FROM asignaciones_servicio a_ciclo
+         WHERE a_ciclo.id_personal = p.id_personal
+         AND a_ciclo.fecha_servicio BETWEEN :fecha_sub6_inicio AND :fecha_sub6_fin
+         AND a_ciclo.estado = 'PROGRAMADO'
+        ) as servicios_en_ciclo,
+        
+        COALESCE(hr.dias_desde_ultimo, 999) as dias_desde_ultimo,
+        
+        (SELECT COUNT(*) FROM reemplazos_servicio rs
+         WHERE rs.id_personal_reemplazo = p.id_personal
+         AND rs.fecha_servicio BETWEEN :fecha_sub5_inicio AND :fecha_sub5_fin
+        ) as veces_reemplazo,
+        
+        COALESCE(hr.compensacion_pendiente, FALSE) as tiene_compensacion,
+        COALESCE(hr.servicios_como_reemplazo, 0) as total_reemplazos
+        
+    FROM bhr_personal p
+    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+        AND :fecha_descanso BETWEEN cd.fecha_inicio AND cd.fecha_fin
+    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal
+    WHERE p.tipo = :tipo
+        AND p.activo = 1
+        AND p.id_personal != :id_comisionado
+        AND cd.id_calendario IS NULL
+        {$filtro_grados}
+        {$filtro_grupos}
+        AND (SELECT COUNT(*) FROM asignaciones_servicio a1
+             WHERE a1.id_personal = p.id_personal 
+             AND a1.fecha_servicio = :fecha_sub1
+             AND a1.estado = 'PROGRAMADO'
+        ) = 0
+        AND (SELECT COUNT(*) FROM asignaciones_servicio a2
+             INNER JOIN tipos_servicio ts2 ON a2.id_tipo_servicio = ts2.id_tipo_servicio
+             WHERE a2.id_personal = p.id_personal 
+             AND a2.fecha_servicio = :fecha_sub2_ayer
+             AND ts2.nombre = 'SERVICIO NOCTURNO'
+             AND a2.estado = 'PROGRAMADO'
+        ) = 0
+        AND (SELECT COUNT(*) FROM asignaciones_servicio a3
+             WHERE a3.id_personal = p.id_personal 
+             AND a3.fecha_servicio = :fecha_sub3
+             AND a3.estado = 'PROGRAMADO'
+        ) = 0
+        AND (SELECT COUNT(*) FROM comisiones_oficiales co
+             WHERE co.id_personal = p.id_personal
+             AND :fecha_sub4 BETWEEN co.fecha_inicio AND co.fecha_fin
+             AND co.estado = 'ACTIVA'
+        ) = 0
+        AND (SELECT COUNT(*) FROM asignaciones_servicio a_ciclo2
+             WHERE a_ciclo2.id_personal = p.id_personal
+             AND a_ciclo2.fecha_servicio BETWEEN :fecha_inicio_ciclo AND :fecha_fin_ciclo
+             AND a_ciclo2.estado = 'PROGRAMADO'
+        ) < 3
+    ORDER BY
+        tiene_compensacion DESC,
+        servicios_en_ciclo ASC,
+        veces_reemplazo ASC,
+        total_reemplazos ASC,
+        dias_desde_ultimo DESC,
+        RAND()
+    LIMIT 1";
+
+        error_log("🔍 SQL COMPLETO:");
+        error_log($sql);
+        error_log("📊 Parámetros: " . json_encode($params));
+
+        $reemplazo = self::fetchFirst($sql, $params);
+
+        if ($reemplazo) {
+            error_log("✅ REEMPLAZO ENCONTRADO:");
+            error_log("   👤 {$reemplazo['nombre_completo']}");
+            error_log("   🎖️ Grado: {$reemplazo['grado']}");
+            error_log("   📊 Tipo: {$reemplazo['tipo_personal']}");
+            error_log("   📈 Servicios en ciclo: {$reemplazo['servicios_en_ciclo']}");
+        } else {
+            error_log("❌ NO SE ENCONTRÓ REEMPLAZO");
+        }
+
+        return $reemplazo;
+    }
+
+    /**
+     * ✅ Obtiene los grados permitidos según el tipo de servicio
+     */
+    private static function obtenerGradosPermitidos($nombre_servicio, $tipo_personal)
+    {
+        $grados = [];
+
+        error_log("🎓 obtenerGradosPermitidos - Servicio: {$nombre_servicio}, Tipo: {$tipo_personal}");
+
+        switch ($nombre_servicio) {
+            case 'TACTICO':
+                if ($tipo_personal === 'ESPECIALISTA') {
+                    $grados = self::fetchArray(
+                        "SELECT id_grado FROM bhr_grados WHERE nombre IN ('Soldado de Segunda', 'Soldado de Primera')",
+                        []
+                    );
+                }
+                break;
+
+            case 'TACTICO TROPA':
+                $grados = self::fetchArray(
+                    "SELECT id_grado FROM bhr_grados WHERE nombre LIKE 'Sargento%'",
+                    []
+                );
+                break;
+
+            case 'BANDERÍN':
+            case 'CUARTELERO':
+                $grados = self::fetchArray(
+                    "SELECT id_grado FROM bhr_grados WHERE nombre LIKE 'Sargento%' OR nombre LIKE 'Cabo%'",
+                    []
+                );
+                break;
+
+            case 'RECONOCIMIENTO':
+                if ($tipo_personal === 'ESPECIALISTA') {
+                    $grados = self::fetchArray(
+                        "SELECT id_grado FROM bhr_grados WHERE nombre IN ('Soldado de Segunda', 'Soldado de Primera')",
+                        []
+                    );
+                } else {
+                    $grados = self::fetchArray(
+                        "SELECT id_grado FROM bhr_grados WHERE nombre IN ('Soldado de Segunda', 'Soldado de Primera', 'Cabo')",
+                        []
+                    );
+                }
+                break;
+
+            case 'SERVICIO NOCTURNO':
+                $grados = self::fetchArray(
+                    "SELECT id_grado FROM bhr_grados WHERE nombre = 'Sargento 2do.' OR nombre LIKE 'Cabo%'",
+                    []
+                );
+                break;
+
+            case 'Semana':
+                $grados = self::fetchArray(
+                    "SELECT id_grado FROM bhr_grados WHERE nombre = 'Sargento 1ro.'",
+                    []
+                );
+                break;
+        }
+
+        $grados_ids = array_column($grados, 'id_grado');
+        error_log("✅ Grados IDs retornados: " . json_encode($grados_ids));
+
+        return $grados_ids;
+    }
+
+    /**
+     * ✅ COMPLETO: Genera 10 días consecutivos
      */
     public static function generarAsignacionesSemanal($fecha_inicio, $usuario_id = null, $grupos_disponibles = [])
     {
@@ -1747,5 +2258,67 @@ class AsignacionServicio extends ActiveRecord
             error_log("❌ ERROR al recalcular historial persona {$id_personal}: " . $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * 🆕 Obtener comisiones activas
+     */
+    /**
+     * 🆕 Obtener comisiones activas con detalles
+     */
+    public static function obtenerComisionesActivas()
+    {
+        $sql = "SELECT 
+                co.id_comision,
+                co.numero_oficio,
+                co.fecha_inicio,
+                co.fecha_fin,
+                co.dias_totales,
+                co.destino,
+                co.motivo,
+                co.estado,
+                p.id_personal,
+                CONCAT(p.nombres, ' ', p.apellidos) as nombre_completo,
+                g.nombre as grado,
+                p.tipo as tipo_personal,
+                (SELECT COUNT(*) 
+                 FROM asignaciones_servicio a 
+                 WHERE a.id_comision = co.id_comision 
+                 AND a.estado = 'EN_COMISION') as servicios_afectados,
+                (SELECT COUNT(*) 
+                 FROM reemplazos_servicio r 
+                 WHERE r.id_comision = co.id_comision) as reemplazos_realizados,
+                co.created_at as fecha_registro
+             FROM comisiones_oficiales co
+             INNER JOIN bhr_personal p ON co.id_personal = p.id_personal
+             INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+             WHERE co.estado = 'ACTIVA'
+             ORDER BY co.fecha_inicio DESC";
+
+        return self::fetchArray($sql, []);
+    }
+
+    /**
+     * 🆕 Obtener personal con compensaciones pendientes
+     */
+    public static function obtenerPersonalConCompensacion()
+    {
+        $sql = "SELECT 
+                p.id_personal,
+                CONCAT(p.nombres, ' ', p.apellidos) as nombre_completo,
+                g.nombre as grado,
+                COALESCE(hr.servicios_como_reemplazo, 0) as servicios_como_reemplazo,
+                COUNT(ch.id_compensacion) as compensaciones_pendientes
+             FROM bhr_personal p
+             INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+             LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal
+             LEFT JOIN compensaciones_historial ch ON p.id_personal = ch.id_personal 
+                AND ch.estado = 'PENDIENTE'
+             WHERE p.activo = 1
+             GROUP BY p.id_personal, p.nombres, p.apellidos, g.nombre, hr.servicios_como_reemplazo
+             HAVING compensaciones_pendientes > 0 OR servicios_como_reemplazo > 0
+             ORDER BY compensaciones_pendientes DESC, servicios_como_reemplazo DESC";
+
+        return self::fetchArray($sql, []);
     }
 }

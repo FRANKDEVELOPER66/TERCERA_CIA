@@ -31,19 +31,18 @@ $router->get('/API/asignaciones/pdf', [AsignacionController::class, 'exportarPDF
 $router->get('/asignaciones/exportar-pdf', [AsignacionController::class, 'exportarPDF']);
 $router->get('/asignaciones/debug', [AsignacionController::class, 'debugAsignaciones']);
 $router->get('/asignaciones/debug', [AsignacionController::class, 'debugAsignaciones']);
-// ✅ Debe estar EXACTAMENTE así:
 $router->post('/API/asignaciones/contar-personal', [AsignacionController::class, 'contarPersonalAPI']);
-
-
-
 $router->get('/API/asignaciones/verificar-fecha', [AsignacionController::class, 'verificarFechaAPI']);
-
-// Ruta para obtener la próxima fecha disponible
 $router->get('/API/asignaciones/proxima-fecha', [AsignacionController::class, 'proximaFechaAPI']);
-
 $router->get('/API/asignaciones/obtener-todos-ciclos', [AsignacionController::class, 'obtenerTodosCiclosAPI']);
+$router->post('/API/asignaciones/registrar-comision', [AsignacionController::class, 'registrarComisionAPI']);
+$router->get('/API/asignaciones/servicios-afectados', [AsignacionController::class, 'serviciosAfectadosAPI']);
+$router->get('/API/asignaciones/comisiones-activas', [AsignacionController::class, 'comisionesActivasAPI']);
+$router->get('/API/asignaciones/personal-con-compensacion', [AsignacionController::class, 'personalConCompensacionAPI']);
 
-// Las
+
+// Agregar la ruta (en la sección donde defines las rutas)
+$router->get('/API/personal/activos', [PersonalController::class, 'obtenerActivosAPI']);
 
 
 // Comprueba y valida las rutas

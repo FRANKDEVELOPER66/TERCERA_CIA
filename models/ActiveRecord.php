@@ -217,11 +217,19 @@ class ActiveRecord
     {
         $stmt = self::$db->prepare($sql);
 
-        foreach ($params as $key => $value) {
-            if ($key === ':cantidad') {
-                $stmt->bindValue($key, (int)$value, PDO::PARAM_INT);
+        // Encontrar todos los placeholders que efectivamente están en el SQL
+        preg_match_all('/:([a-zA-Z_][a-zA-Z0-9_]*)/', $sql, $matches);
+        $placeholders_en_sql = array_unique($matches[0]);
+
+        foreach ($placeholders_en_sql as $placeholder) {
+            if ($placeholder === ':cantidad') {
+                if (isset($params[$placeholder])) {
+                    $stmt->bindValue($placeholder, (int)$params[$placeholder], PDO::PARAM_INT);
+                }
             } else {
-                $stmt->bindValue($key, $value);
+                if (isset($params[$placeholder])) {
+                    $stmt->bindValue($placeholder, $params[$placeholder]);
+                }
             }
         }
 
@@ -230,11 +238,90 @@ class ActiveRecord
     }
 
 
+    /**
+     * 🆕 MÉTODOS DE TRANSACCIONES
+     */
+
+    /**
+     * Iniciar transacción
+     */
+    public static function beginTransaction()
+    {
+        try {
+            if (self::$db) {
+                self::$db->beginTransaction();
+                return true;
+            }
+            return false;
+        } catch (\Exception $e) {
+            error_log("❌ Error al iniciar transacción: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Confirmar transacción
+     */
+    public static function commit()
+    {
+        try {
+            if (self::$db && self::$db->inTransaction()) {
+                self::$db->commit();
+                return true;
+            }
+            return false;
+        } catch (\Exception $e) {
+            error_log("❌ Error al hacer commit: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Revertir transacción
+     */
+    public static function rollback()
+    {
+        try {
+            if (self::$db && self::$db->inTransaction()) {
+                self::$db->rollBack();
+                return true;
+            }
+            return false;
+        } catch (\Exception $e) {
+            error_log("❌ Error al hacer rollback: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Verificar si hay una transacción activa
+     */
+    public static function inTransaction()
+    {
+        try {
+            return self::$db && self::$db->inTransaction();
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
 
     public static function fetchFirst($sql, $params = [])
     {
         $stmt = self::$db->prepare($sql);
-        $stmt->execute($params);
+
+        // Encontrar todos los placeholders que efectivamente están en el SQL
+        preg_match_all('/:([a-zA-Z_][a-zA-Z0-9_]*)/', $sql, $matches);
+        $placeholders_en_sql = array_unique($matches[0]);
+
+        // Solo bindear los que existen en el SQL
+        foreach ($placeholders_en_sql as $placeholder) {
+            if (isset($params[$placeholder])) {
+                $stmt->bindValue($placeholder, $params[$placeholder]);
+            }
+        }
+
+        $stmt->execute();
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
@@ -301,23 +388,29 @@ class ActiveRecord
     }
 
     // Agregar este método a la clase ActiveRecord
+    // ActiveRecord.php - ejecutarQuery CORREGIDO
     public static function ejecutarQuery($sql, $params = [])
     {
         try {
             $stmt = self::$db->prepare($sql);
 
-            foreach ($params as $key => $value) {
-                $stmt->bindValue($key, $value);
-            }
+            // Usar execute() directamente con el array de params
+            // Esto resuelve automáticamente placeholders repetidos
+            $resultado = $stmt->execute($params);
 
-            $resultado = $stmt->execute();
-
-            return $resultado;
+            return [
+                'resultado' => $resultado,
+                'filas_afectadas' => $stmt->rowCount()
+            ];
         } catch (\PDOException $e) {
             error_log("Error en ejecutarQuery: " . $e->getMessage());
             error_log("SQL: " . $sql);
             error_log("Params: " . print_r($params, true));
-            return false;
+            return [
+                'resultado' => false,
+                'filas_afectadas' => 0,
+                'error' => $e->getMessage()
+            ];
         }
     }
 }

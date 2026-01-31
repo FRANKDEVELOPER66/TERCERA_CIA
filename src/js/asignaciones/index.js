@@ -29,6 +29,26 @@ const modalHistorialCiclos = modalHistorialElement ? new bootstrap.Modal(modalHi
 const fabHistorial = document.getElementById('fabHistorial');
 const contenedorHistorial = document.getElementById('contenedorHistorial');
 
+// 🆕 Referencias a elementos de comisiones
+const btnComisionFlotante = document.getElementById('btnComisionFlotante');
+const btnVerComisionesActivas = document.getElementById('btnVerComisionesActivas');
+const btnVerCompensaciones = document.getElementById('btnVerCompensaciones');
+
+const modalComisionElement = document.getElementById('modalComision');
+const modalComisionBS = modalComisionElement ? new bootstrap.Modal(modalComisionElement) : null;
+
+const modalComisionesActivasElement = document.getElementById('modalComisionesActivas');
+const modalComisionesActivasBS = modalComisionesActivasElement ? new bootstrap.Modal(modalComisionesActivasElement) : null;
+
+const modalCompensacionesElement = document.getElementById('modalCompensaciones');
+const modalCompensacionesBS = modalCompensacionesElement ? new bootstrap.Modal(modalCompensacionesElement) : null;
+
+
+const btnRegistrarComision = document.getElementById('btnRegistrarComision');
+const personalComision = document.getElementById('personalComision');
+const fechaInicioComision = document.getElementById('fechaInicioComision');
+const fechaFinComision = document.getElementById('fechaFinComision');
+
 // Estado de la vista
 let estadoVista = 'seleccion';
 let fechaActualInfo = null;
@@ -307,6 +327,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ✨ NUEVO: Cargar próxima fecha disponible al iniciar
     cargarProximaFechaDisponible();
+
+    // 🆕 Event listeners para comisiones
+    if (btnComisionFlotante) {
+        btnComisionFlotante.addEventListener('click', abrirModalComision);
+    }
+    const btnRegistrarComisionDirecto = document.getElementById('btnRegistrarComisionDirecto');
+    if (btnRegistrarComisionDirecto) {
+        btnRegistrarComisionDirecto.addEventListener('click', abrirModalComision);
+    }
+
+    if (btnVerComisionesActivas) {
+        btnVerComisionesActivas.addEventListener('click', abrirModalComisionesActivas);
+    }
+
+    if (btnVerCompensaciones) {
+        btnVerCompensaciones.addEventListener('click', abrirModalCompensaciones);
+    }
+
+    if (btnRegistrarComision) {
+        btnRegistrarComision.addEventListener('click', registrarComision);
+    }
+
+    // Event listeners para actualizar vista previa
+    if (personalComision) {
+        personalComision.addEventListener('change', actualizarVistaPrevia);
+    }
+
+    if (fechaInicioComision) {
+        fechaInicioComision.addEventListener('change', actualizarVistaPrevia);
+    }
+
+    if (fechaFinComision) {
+        fechaFinComision.addEventListener('change', actualizarVistaPrevia);
+    }
 });
 
 // ========================================
@@ -1286,6 +1340,581 @@ const formatearFecha = (fecha) => {
         day: 'numeric'
     };
     return date.toLocaleDateString('es-ES', opciones);
+};
+
+// ========================================
+// 🆕 FUNCIONES DE COMISIONES
+// ========================================
+
+/**
+ * 🆕 ABRIR MODAL DE COMISIÓN
+ */
+const abrirModalComision = async () => {
+    await cargarPersonalDisponible();
+
+    // 🔍 DEBUG - Verificar que se cargó personal
+    const select = document.getElementById('personalComision');
+    console.log('👥 Personal cargado:', select?.options.length, 'opciones');
+    console.log('📋 Primer personal:', select?.options[1]?.value, select?.options[1]?.text);
+
+
+    // Establecer fecha mínima (hoy)
+    const hoy = new Date().toISOString().split('T')[0];
+    if (fechaInicioComision) {
+        fechaInicioComision.min = hoy;
+        fechaInicioComision.value = hoy;
+    }
+
+    if (fechaFinComision) {
+        fechaFinComision.min = hoy;
+    }
+
+    // Limpiar formulario
+    document.getElementById('formComision').reset();
+    document.getElementById('destinoComision').value = 'Ciudad Capital';
+    document.getElementById('serviciosAfectadosPreview').style.display = 'none';
+    document.getElementById('resumenDiasComision').style.display = 'none';
+
+    if (modalComisionBS) {
+        modalComisionBS.show();
+    }
+};
+
+/**
+ * 🆕 CARGAR PERSONAL DISPONIBLE
+ */
+const cargarPersonalDisponible = async () => {
+    const select = document.getElementById('personalComision');
+
+    if (!select) {
+        console.error('❌ Select personalComision no encontrado');
+        return;
+    }
+
+    try {
+        const response = await fetch('/TERCERA_CIA/API/personal/activos');
+        const data = await response.json();
+
+        console.log('✅ Respuesta completa del API:', data);
+
+        if (data.codigo === 1 && Array.isArray(data.personal)) {
+            select.innerHTML = '<option value="">Seleccione el personal...</option>';
+
+            // Agrupar por tipo con validación
+            const porTipo = {
+                'OFICIAL': [],
+                'ESPECIALISTA': [],
+                'TROPA': []
+            };
+
+            data.personal.forEach(p => {
+                console.log('👤 Procesando:', p); // 🔍 Ver cada persona
+
+                // ✅ Validar que tenga tipo y que sea válido
+                const tipo = p.tipo?.toUpperCase().trim();
+
+                if (tipo && porTipo[tipo]) {
+                    porTipo[tipo].push(p);
+                } else {
+                    console.warn('⚠️ Tipo no reconocido:', tipo, 'para persona:', p);
+                }
+            });
+
+            console.log('📊 Personal agrupado:', porTipo);
+
+            // Agregar opciones agrupadas
+            Object.entries(porTipo).forEach(([tipo, personal]) => {
+                if (personal.length > 0) {
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = tipo;
+
+                    personal.forEach(p => {
+                        const option = document.createElement('option');
+                        option.value = p.id_personal;
+
+                        // ✅ Construir el texto con validación
+                        const grado = p.grado || '';
+                        const nombres = p.nombres || '';
+                        const apellidos = p.apellidos || '';
+
+                        option.textContent = `${grado} ${nombres} ${apellidos}`.trim();
+
+                        console.log('➕ Agregando opción:', option.value, option.textContent);
+
+                        optgroup.appendChild(option);
+                    });
+
+                    select.appendChild(optgroup);
+                }
+            });
+
+            const totalOpciones = select.options.length - 1; // -1 por el placeholder
+            console.log(`✅ Select poblado con ${totalOpciones} opciones`);
+
+            if (totalOpciones === 0) {
+                console.warn('⚠️ No se agregó ninguna opción al select');
+            }
+        } else {
+            console.error('❌ Respuesta inválida del API:', data);
+            Toast.fire({
+                icon: 'error',
+                title: 'Formato de respuesta inválido'
+            });
+        }
+    } catch (error) {
+        console.error('❌ Error al cargar personal:', error);
+        console.error('Stack:', error.stack);
+        Toast.fire({
+            icon: 'error',
+            title: 'Error al cargar personal disponible'
+        });
+    }
+};
+
+/**
+ * 🆕 ACTUALIZAR VISTA PREVIA
+ */
+const actualizarVistaPrevia = async () => {
+    const idPersonal = personalComision?.value;
+    const fechaInicio = fechaInicioComision?.value;
+    const fechaFin = fechaFinComision?.value;
+
+    const previewDiv = document.getElementById('serviciosAfectadosPreview');
+    const listaDiv = document.getElementById('listaServiciosAfectados');
+    const resumenDiv = document.getElementById('resumenDiasComision');
+    const totalDiasSpan = document.getElementById('totalDiasComision');
+    const alertaCompensacion = document.getElementById('alertaCompensacion');
+
+    if (!idPersonal || !fechaInicio || !fechaFin) {
+        if (previewDiv) previewDiv.style.display = 'none';
+        if (resumenDiv) resumenDiv.style.display = 'none';
+        return;
+    }
+
+    // Calcular días totales
+    const inicio = new Date(fechaInicio);
+    const fin = new Date(fechaFin);
+    const diasTotales = Math.ceil((fin - inicio) / (1000 * 60 * 60 * 24)) + 1;
+
+    if (totalDiasSpan) {
+        totalDiasSpan.textContent = diasTotales;
+    }
+
+    if (resumenDiv) {
+        resumenDiv.style.display = 'block';
+    }
+
+    // Mostrar alerta si es comisión larga
+    if (alertaCompensacion) {
+        alertaCompensacion.style.display = diasTotales >= 10 ? 'block' : 'none';
+    }
+
+    try {
+        const response = await fetch(
+            `/TERCERA_CIA/API/asignaciones/servicios-afectados?` +
+            `id_personal=${idPersonal}&fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
+        );
+        const data = await response.json();
+
+        if (data.codigo === 1 && data.servicios.length > 0) {
+            listaDiv.innerHTML = '';
+
+            data.servicios.forEach(s => {
+                const div = document.createElement('div');
+                div.className = 'servicio-item';
+                div.innerHTML = `
+                    <strong>${formatearFecha(s.fecha_servicio)}</strong> - ${s.servicio}
+                    <br>
+                    <small class="text-muted">
+                        <i class="bi bi-clock"></i> ${s.hora_inicio.substring(0, 5)} - ${s.hora_fin.substring(0, 5)}
+                    </small>
+                `;
+                listaDiv.appendChild(div);
+            });
+
+            previewDiv.style.display = 'block';
+        } else {
+            listaDiv.innerHTML = '<p class="text-muted mb-0">No tiene servicios programados en estas fechas</p>';
+            previewDiv.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error:', error);
+    }
+};
+
+/**
+ * 🆕 REGISTRAR COMISIÓN
+ */
+const registrarComision = async () => {
+    const datos = {
+        id_personal: personalComision?.value,
+        fecha_inicio: fechaInicioComision?.value,
+        fecha_fin: fechaFinComision?.value,
+        destino: document.getElementById('destinoComision')?.value || 'Ciudad Capital',
+        numero_oficio: document.getElementById('numeroOficio')?.value,
+        motivo: document.getElementById('motivoComision')?.value
+    };
+
+    // 🔍 DEBUG - Ver qué se está enviando
+    console.log('📤 Datos a enviar:', datos);
+
+    // Validaciones
+    if (!datos.id_personal || !datos.fecha_inicio || !datos.fecha_fin || !datos.numero_oficio) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Datos incompletos',
+            text: 'Complete todos los campos obligatorios marcados con *',
+            confirmButtonColor: '#f39c12'
+        });
+        return;
+    }
+
+    // 🔍 Verificar que el ID sea un número válido
+    if (isNaN(parseInt(datos.id_personal))) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Personal inválido',
+            text: 'Debe seleccionar un personal válido',
+            confirmButtonColor: '#e74c3c'
+        });
+        return;
+    }
+
+    // Confirmación
+    const confirmacion = await Swal.fire({
+        icon: 'question',
+        title: '¿Registrar comisión oficial?',
+        html: `
+            <div style="text-align: left;">
+                <p><strong>Personal:</strong> ${personalComision.options[personalComision.selectedIndex].text}</p>
+                <p><strong>Destino:</strong> ${datos.destino}</p>
+                <p><strong>Fechas:</strong> ${formatearFecha(datos.fecha_inicio)} al ${formatearFecha(datos.fecha_fin)}</p>
+                <p><strong>Oficio:</strong> ${datos.numero_oficio}</p>
+                <hr>
+                <p class="text-warning mb-0">
+                    <i class="bi bi-info-circle"></i> 
+                    El sistema buscará reemplazos automáticamente siguiendo criterios de equidad.
+                </p>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-check-circle"></i> Sí, registrar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#f39c12',
+        cancelButtonColor: '#6c757d'
+    });
+
+    if (!confirmacion.isConfirmed) return;
+
+    try {
+        mostrarLoading(true);
+
+        const formData = new FormData();
+        Object.keys(datos).forEach(key => {
+            formData.append(key, datos[key]);
+        });
+
+        const response = await fetch('/TERCERA_CIA/API/asignaciones/registrar-comision', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        mostrarLoading(false);
+
+        if (data.codigo === 1) {
+            if (modalComisionBS) {
+                modalComisionBS.hide();
+            }
+
+            // Mostrar resultado detallado
+            await Swal.fire({
+                icon: 'success',
+                title: '✅ Comisión Registrada',
+                html: generarHTMLResultado(data.data),
+                confirmButtonText: 'Entendido',
+                confirmButtonColor: '#27ae60',
+                width: '600px'
+            });
+
+            // Recargar vista si está consultando servicios
+            if (typeof consultarServicios === 'function') {
+                consultarServicios();
+            }
+        } else {
+            Swal.fire({
+                icon: 'error',
+                title: 'Error al registrar',
+                text: data.mensaje,
+                confirmButtonColor: '#e74c3c'
+            });
+        }
+    } catch (error) {
+        mostrarLoading(false);
+        console.error('Error:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'Error',
+            text: 'Error al registrar comisión: ' + error.message,
+            confirmButtonColor: '#e74c3c'
+        });
+    }
+};
+
+/**
+ * 🆕 GENERAR HTML DE RESULTADO
+ */
+const generarHTMLResultado = (data) => {
+    let html = `
+        <div style="text-align: left;">
+            <div class="alert alert-success">
+                <strong>📋 Resumen de la comisión:</strong>
+                <ul class="mb-0 mt-2">
+                    <li><strong>Oficio:</strong> ${data.numero_oficio}</li>
+                    <li><strong>Duración:</strong> ${data.dias_comision} días</li>
+                    <li><strong>Servicios afectados:</strong> ${data.servicios_afectados}</li>
+                    <li><strong>Reemplazos realizados:</strong> ${data.reemplazos_realizados}</li>
+                </ul>
+            </div>
+    `;
+
+    if (data.reemplazos_realizados > 0) {
+        html += `
+            <div class="alert alert-info">
+                <strong>✅ Reemplazos asignados:</strong>
+                <ul class="mb-0 mt-2">
+        `;
+
+        data.detalles_reemplazos.forEach(r => {
+            html += `
+                <li>
+                    <strong>${formatearFecha(r.fecha)}</strong> - ${r.servicio}
+                    <br>
+                    <small>Reemplazo: ${r.grado} ${r.reemplazo}</small>
+                </li>
+            `;
+        });
+
+        html += `
+                </ul>
+            </div>
+        `;
+    }
+
+    if (data.servicios_sin_reemplazo > 0) {
+        html += `
+            <div class="alert alert-warning">
+                <strong>⚠️ Servicios sin reemplazo (requieren atención manual):</strong>
+                <ul class="mb-0 mt-2">
+        `;
+
+        data.detalles_sin_reemplazo.forEach(s => {
+            html += `
+                <li><strong>${formatearFecha(s.fecha)}</strong> - ${s.servicio}</li>
+            `;
+        });
+
+        html += `
+                </ul>
+                <hr>
+                <small>
+                    <i class="bi bi-info-circle"></i> 
+                    Estos servicios no pudieron ser cubiertos automáticamente. 
+                    Deberá gestionarse manualmente o ajustar la distribución.
+                </small>
+            </div>
+        `;
+    }
+
+    if (data.dias_comision >= 10) {
+        html += `
+            <div class="alert alert-primary">
+                <i class="bi bi-gift-fill"></i>
+                <strong>Compensación otorgada:</strong>
+                <p class="mb-0">
+                    Por ser una comisión larga, el personal recibirá prioridad adicional al regresar.
+                </p>
+            </div>
+        `;
+    }
+
+    html += '</div>';
+    return html;
+};
+
+/**
+ * 🆕 ABRIR MODAL DE COMISIONES ACTIVAS
+ */
+const abrirModalComisionesActivas = async () => {
+    if (modalComisionesActivasBS) {
+        modalComisionesActivasBS.show();
+        await cargarComisionesActivas();
+    }
+};
+
+const cargarComisionesActivas = async () => {
+    const contenedor = document.getElementById('contenedorComisionesActivas');
+
+    if (!contenedor) return;
+
+    contenedor.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-warning" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <p class="mt-3">Cargando comisiones activas...</p>
+        </div>
+    `;
+
+    try {
+        const response = await fetch('/TERCERA_CIA/API/asignaciones/comisiones-activas');
+        const data = await response.json();
+
+        if (data.codigo === 1 && data.comisiones.length > 0) {
+            let html = `
+                <table class="tabla-comisiones table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Personal</th>
+                            <th>Destino</th>
+                            <th>Fechas</th>
+                            <th>Días</th>
+                            <th>Oficio</th>
+                            <th>Reemplazos</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.comisiones.forEach(c => {
+                html += `
+                    <tr>
+                        <td>
+                            <strong>${c.grado}</strong><br>
+                            ${c.nombre_completo}
+                        </td>
+                        <td>${c.destino}</td>
+                        <td>
+                            <small>
+                                ${formatearFecha(c.fecha_inicio)}<br>
+                                al ${formatearFecha(c.fecha_fin)}
+                            </small>
+                        </td>
+                        <td>
+                            <span class="badge bg-primary">${c.dias_totales} días</span>
+                        </td>
+                        <td>
+                            <code>${c.numero_oficio}</code>
+                        </td>
+                        <td>
+                            <span class="badge-reemplazos">
+                                ${c.reemplazos_realizados}/${c.servicios_afectados}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            contenedor.innerHTML = html;
+        } else {
+            contenedor.innerHTML = `
+                <div class="empty-state">
+                    <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <h4>No hay comisiones activas</h4>
+                    <p>No hay personal en comisión actualmente</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        contenedor.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i>
+                Error al cargar comisiones activas
+            </div>
+        `;
+    }
+};
+
+/**
+ * 🆕 ABRIR MODAL DE COMPENSACIONES
+ */
+const abrirModalCompensaciones = async () => {
+    if (modalCompensacionesBS) {
+        modalCompensacionesBS.show();
+        await cargarPersonalConCompensacion();
+    }
+};
+
+const cargarPersonalConCompensacion = async () => {
+    const contenedor = document.getElementById('contenedorCompensaciones');
+
+    if (!contenedor) return;
+
+    contenedor.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-success" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <p class="mt-3">Cargando compensaciones...</p>
+        </div>
+    `;
+
+    try {
+        const response = await fetch('/TERCERA_CIA/API/asignaciones/personal-con-compensacion');
+        const data = await response.json();
+
+        if (data.codigo === 1 && data.personal.length > 0) {
+            let html = '';
+
+            data.personal.forEach(p => {
+                html += `
+                    <div class="compensacion-card">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-1">
+                                    <i class="bi bi-person-fill"></i>
+                                    ${p.grado} ${p.nombre_completo}
+                                </h6>
+                                <small class="text-muted">
+                                    Ha sido reemplazo ${p.servicios_como_reemplazo} veces
+                                </small>
+                            </div>
+                            <div>
+                                <span class="badge bg-success">
+                                    ${p.compensaciones_pendientes} compensación(es) pendiente(s)
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            contenedor.innerHTML = html;
+        } else {
+            contenedor.innerHTML = `
+                <div class="empty-state">
+                    <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.3; color: #27ae60;"></i>
+                    <h4>No hay compensaciones pendientes</h4>
+                    <p>Todo el personal está al día</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        contenedor.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i>
+                Error al cargar compensaciones
+            </div>
+        `;
+    }
 };
 
 // ========================================

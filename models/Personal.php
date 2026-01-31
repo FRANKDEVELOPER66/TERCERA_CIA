@@ -56,4 +56,39 @@ class Personal extends ActiveRecord
 
         return self::fetchArray($sql);
     }
+
+
+    public static function obtenerPersonalActivo()
+    {
+        $sql = "SELECT 
+            p.id_personal,
+            p.nombres,
+            p.apellidos,
+            p.tipo,              -- ✅ Asegúrate de que esto esté aquí
+            g.nombre as grado,
+            g.orden as orden_grado,
+            p.id_grupo_descanso
+        FROM bhr_personal p
+        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+        WHERE p.activo = 1
+        ORDER BY 
+            CASE p.tipo
+                WHEN 'OFICIAL' THEN 1
+                WHEN 'ESPECIALISTA' THEN 2
+                WHEN 'TROPA' THEN 3
+            END,
+            g.orden ASC,
+            p.apellidos ASC,
+            p.nombres ASC";
+
+        $personal = self::fetchArray($sql, []);
+
+        // 🔍 DEBUG - Ver qué se está devolviendo
+        error_log("📋 Personal obtenido: " . count($personal) . " registros");
+        if (count($personal) > 0) {
+            error_log("👤 Primer registro: " . json_encode($personal[0]));
+        }
+
+        return $personal;
+    }
 }

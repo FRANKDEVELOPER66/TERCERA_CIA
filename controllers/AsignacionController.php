@@ -8,6 +8,7 @@ use Model\Personal;
 use Model\TiposServicio;
 use MVC\Router;
 use Mpdf\Mpdf;
+use Model\ComisionOficial;
 
 class AsignacionController
 {
@@ -333,12 +334,232 @@ class AsignacionController
         }
     }
 
+    // ========================================
+    // 🆕 ENDPOINTS DE COMISIONES
+    // ========================================
+
+    /**
+     * 🆕 API: Registrar comisión oficial
+     */
+    public static function registrarComisionAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+        ob_start();
+
+        try {
+            $id_personal = $_POST['id_personal'] ?? null;
+            $fecha_inicio = $_POST['fecha_inicio'] ?? null;
+            $fecha_fin = $_POST['fecha_fin'] ?? null;
+            $numero_oficio = $_POST['numero_oficio'] ?? null;
+            $destino = $_POST['destino'] ?? 'Ciudad Capital';
+            $motivo = $_POST['motivo'] ?? '';
+
+            // 🔥 AQUÍ ESTÁ EL PROBLEMA - ARREGLADO:
+            $usuario_id = $_SESSION['user_id'] ?? $_SESSION['id'] ?? 1; // ✅ Default a 1 si no hay sesión
+
+            ob_clean();
+
+            // Validaciones
+            if (!$id_personal || !$fecha_inicio || !$fecha_fin || !$numero_oficio) {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'Datos incompletos. Se requiere: personal, fechas y número de oficio'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            // 🔍 DEBUG - Ver qué usuario se está enviando
+            error_log("👤 Usuario que registra: {$usuario_id}");
+            error_log("📋 Datos a insertar: " . json_encode([
+                'id_personal' => $id_personal,
+                'fecha_inicio' => $fecha_inicio,
+                'fecha_fin' => $fecha_fin,
+                'numero_oficio' => $numero_oficio,
+                'created_by' => $usuario_id
+            ]));
+
+            // Validar formato de fechas
+            if (
+                !preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha_inicio) ||
+                !preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha_fin)
+            ) {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'Formato de fecha inválido'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            // Validar que fecha_fin >= fecha_inicio
+            if (strtotime($fecha_fin) < strtotime($fecha_inicio)) {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'La fecha de fin debe ser posterior o igual a la fecha de inicio'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            $resultado = AsignacionServicio::registrarComision([
+                'id_personal' => $id_personal,
+                'fecha_inicio' => $fecha_inicio,
+                'fecha_fin' => $fecha_fin,
+                'destino' => $destino,
+                'numero_oficio' => $numero_oficio,
+                'motivo' => $motivo,
+                'created_by' => $usuario_id // ✅ Ahora siempre tiene un valor
+            ]);
+
+            ob_end_clean();
+
+            if ($resultado['exito']) {
+                http_response_code(200);
+                echo json_encode([
+                    'codigo' => 1,
+                    'mensaje' => $resultado['mensaje'],
+                    'data' => $resultado['data']
+                ], JSON_UNESCAPED_UNICODE);
+            } else {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => $resultado['mensaje']
+                ], JSON_UNESCAPED_UNICODE);
+            }
+        } catch (\Exception $e) {
+            ob_end_clean();
+
+            error_log("❌ ERROR en registrarComisionAPI: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al registrar comisión: ' . $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    /**
+     * 🆕 API: Obtener servicios afectados por rango de fechas
+     */
+    public static function serviciosAfectadosAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        $id_personal = $_GET['id_personal'] ?? null;
+        $fecha_inicio = $_GET['fecha_inicio'] ?? null;
+        $fecha_fin = $_GET['fecha_fin'] ?? null;
+
+        if (!$id_personal || !$fecha_inicio || !$fecha_fin) {
+            http_response_code(400);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Parámetros incompletos'
+            ], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+
+        try {
+            $servicios = AsignacionServicio::fetchArray(
+                "SELECT 
+                    a.id_asignacion,
+                    a.fecha_servicio,
+                    ts.nombre as servicio,
+                    a.hora_inicio,
+                    a.hora_fin,
+                    a.estado
+                 FROM asignaciones_servicio a
+                 INNER JOIN tipos_servicio ts ON a.id_tipo_servicio = ts.id_tipo_servicio
+                 WHERE a.id_personal = :id_personal
+                 AND a.fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+                 AND a.estado = 'PROGRAMADO'
+                 ORDER BY a.fecha_servicio ASC",
+                [
+                    ':id_personal' => $id_personal,
+                    ':fecha_inicio' => $fecha_inicio,
+                    ':fecha_fin' => $fecha_fin
+                ]
+            );
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Servicios encontrados',
+                'servicios' => $servicios,
+                'total' => count($servicios)
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error: ' . $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    /**
+     * 🆕 API: Obtener comisiones activas
+     */
+    public static function comisionesActivasAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $comisiones = AsignacionServicio::obtenerComisionesActivas();
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Comisiones obtenidas',
+                'comisiones' => $comisiones
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en comisionesActivasAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error: ' . $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    /**
+     * 🆕 API: Obtener personal con compensaciones pendientes
+     */
+    public static function personalConCompensacionAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $personal = AsignacionServicio::obtenerPersonalConCompensacion();
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Personal con compensaciones',
+                'personal' => $personal
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en personalConCompensacionAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error: ' . $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    // ========================================
+    // EXPORTAR PDF (sin cambios)
+    // ========================================
+
     /**
      * ✅ MEJORADO: Exporta PDF de ciclo de 10 días
-     * - 10 páginas individuales (una por día)
-     * - 1 cronograma dividido en 2 tablas de 5 días cada una CON FECHAS REALES
-     * - Muestra el TIPO de personal correctamente (ESPECIALISTA)
-     * - Separa visualmente ESPECIALISTAS de TROPA con líneas divisorias
      */
     public static function exportarPDF(Router $router)
     {
@@ -424,9 +645,10 @@ class AsignacionController
         }
     }
 
-    /**
-     * ✅ Genera página individual de un día (sin cambios)
-     */
+    // ========================================
+    // FUNCIONES AUXILIARES PDF (sin cambios)
+    // ========================================
+
     private static function generarPaginaDia($dia_nombre, $fecha_formateada, $oficial_dia, $servicios_agrupados)
     {
         $html = '
@@ -516,12 +738,6 @@ class AsignacionController
         return $html;
     }
 
-    /**
-     * ✅ MEJORADO: Genera cronograma dividido en 2 tablas de 5 días cada una
-     * - Muestra días de la semana y fechas reales en los encabezados
-     * - Muestra el tipo de personal correctamente (ESPECIALISTA)
-     * - Separa visualmente ESPECIALISTAS de TROPA
-     */
     private static function generarCronogramaCiclo($asignaciones, $fecha_inicio)
     {
         $fecha_inicio_obj = new \DateTime($fecha_inicio);
@@ -670,12 +886,6 @@ class AsignacionController
         return $html;
     }
 
-    /**
-     * ✅ MEJORADO: Genera una tabla para un rango de días específico CON FECHAS REALES
-     * - Muestra días de la semana abreviados (MAR, MIÉ, etc.)
-     * - Muestra el número de día del mes
-     * - Separa ESPECIALISTAS de TROPA con línea divisoria verde
-     */
     private static function generarTablaRango($personal_servicios, $dia_inicio, $dia_fin, $titulo, $fecha_inicio_ciclo)
     {
         $html = '
@@ -796,66 +1006,6 @@ class AsignacionController
         return $html;
     }
 
-
-
-
-    /**
-     * ✨ NUEVO: Obtiene el historial de todos los ciclos generados
-     */
-    public static function historialCiclosAPI()
-    {
-        header('Content-Type: application/json; charset=UTF-8');
-
-        try {
-            $ciclos = AsignacionServicio::obtenerHistorialCiclos();
-
-            http_response_code(200);
-            echo json_encode([
-                'codigo' => 1,
-                'mensaje' => 'Historial obtenido',
-                'ciclos' => $ciclos
-            ], JSON_UNESCAPED_UNICODE);
-        } catch (Exception $e) {
-            http_response_code(500);
-            echo json_encode([
-                'codigo' => 0,
-                'mensaje' => 'Error al obtener historial',
-                'detalle' => $e->getMessage(),
-            ], JSON_UNESCAPED_UNICODE);
-        }
-    }
-
-
-    /**
-     * ✨ NUEVO: Obtiene el historial de todos los ciclos generados
-     */
-    public static function obtenerTodosCiclosAPI()
-    {
-        header('Content-Type: application/json; charset=UTF-8');
-
-        try {
-            $ciclos = AsignacionServicio::obtenerHistorialCiclos();
-
-            http_response_code(200);
-            echo json_encode([
-                'codigo' => 1,
-                'mensaje' => 'Historial obtenido',
-                'ciclos' => $ciclos
-            ], JSON_UNESCAPED_UNICODE);
-        } catch (Exception $e) {
-            http_response_code(500);
-            echo json_encode([
-                'codigo' => 0,
-                'mensaje' => 'Error al obtener historial',
-                'detalle' => $e->getMessage(),
-            ], JSON_UNESCAPED_UNICODE);
-        }
-    }
-
-    // ========================================
-    // FUNCIONES AUXILIARES
-    // ========================================
-
     private static function obtenerNumeroTurno($asignacion_actual, $todas_asignaciones)
     {
         $nocturnos_dia = array_filter($todas_asignaciones, function ($asig) use ($asignacion_actual) {
@@ -884,9 +1034,6 @@ class AsignacionController
         return $dias[$num];
     }
 
-    /**
-     * ✅ MODIFICADA: Obtiene nombre de día COMPLETO en español (en mayúsculas)
-     */
     private static function getNombreDiaCorto($num)
     {
         $dias = ['', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO'];
@@ -952,5 +1099,57 @@ class AsignacionController
         ];
 
         return $colores[$servicio_base] ?? '#000000';
+    }
+
+    /**
+     * ✨ NUEVO: Obtiene el historial de todos los ciclos generados
+     */
+    public static function historialCiclosAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $ciclos = AsignacionServicio::obtenerHistorialCiclos();
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Historial obtenido',
+                'ciclos' => $ciclos
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al obtener historial',
+                'detalle' => $e->getMessage(),
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    /**
+     * ✨ NUEVO: Obtiene el historial de todos los ciclos generados
+     */
+    public static function obtenerTodosCiclosAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $ciclos = AsignacionServicio::obtenerHistorialCiclos();
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Historial obtenido',
+                'ciclos' => $ciclos
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al obtener historial',
+                'detalle' => $e->getMessage(),
+            ], JSON_UNESCAPED_UNICODE);
+        }
     }
 }

@@ -54,6 +54,150 @@
     }
 
     /* ========================================
+       🎨 ESTILOS PARA COMISIONES
+       ======================================== */
+
+    /* Botón flotante de comisiones */
+    .btn-comision-flotante {
+        position: fixed;
+        bottom: 100px;
+        right: 30px;
+        width: 60px;
+        height: 60px;
+        background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 8px 25px rgba(243, 156, 18, 0.4);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        z-index: 999;
+        border: none;
+        color: white;
+        font-size: 1.5rem;
+    }
+
+    .btn-comision-flotante:hover {
+        transform: translateY(-5px) scale(1.1);
+        box-shadow: 0 12px 35px rgba(243, 156, 18, 0.6);
+    }
+
+    .btn-comision-flotante i {
+        animation: plane-fly 2s infinite;
+    }
+
+    @keyframes plane-fly {
+
+        0%,
+        100% {
+            transform: translateX(0);
+        }
+
+        50% {
+            transform: translateX(5px);
+        }
+    }
+
+    /* Servicios afectados */
+    #listaServiciosAfectados .servicio-item {
+        padding: 10px;
+        background: rgba(243, 156, 18, 0.1);
+        border-left: 4px solid #f39c12;
+        margin-bottom: 8px;
+        border-radius: 4px;
+    }
+
+    /* Tabla de comisiones activas */
+    .tabla-comisiones {
+        width: 100%;
+    }
+
+    .tabla-comisiones thead {
+        background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);
+        color: white;
+    }
+
+    .tabla-comisiones th {
+        padding: 12px;
+        font-weight: 600;
+        text-align: center;
+    }
+
+    .tabla-comisiones td {
+        padding: 12px;
+        vertical-align: middle;
+        text-align: center;
+    }
+
+    .tabla-comisiones tbody tr:hover {
+        background: #fef5e7;
+    }
+
+    .badge-comision-activa {
+        background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+        color: white;
+        padding: 6px 15px;
+        border-radius: 20px;
+        font-weight: 600;
+    }
+
+    .badge-reemplazos {
+        background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+        color: white;
+        padding: 4px 10px;
+        border-radius: 15px;
+        font-size: 0.85rem;
+    }
+
+    /* Card de compensación */
+    .compensacion-card {
+        background: linear-gradient(135deg, #ecf9f2 0%, #d5f4e6 100%);
+        border-left: 4px solid #27ae60;
+        padding: 15px;
+        margin-bottom: 10px;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+    }
+
+    .compensacion-card:hover {
+        transform: translateX(5px);
+        box-shadow: 0 4px 15px rgba(39, 174, 96, 0.2);
+    }
+
+    .compensacion-card .badge {
+        font-size: 0.9rem;
+    }
+
+    /* Indicador de comisión en servicios */
+    .personnel-item.en-comision {
+        background: linear-gradient(135deg, rgba(243, 156, 18, 0.2) 0%, rgba(230, 126, 34, 0.2) 100%);
+        border-left: 4px solid #f39c12;
+        position: relative;
+    }
+
+    .personnel-item.en-comision::before {
+        content: "✈️";
+        position: absolute;
+        left: -25px;
+        font-size: 1.2rem;
+    }
+
+    .personnel-item.reemplazo {
+        background: linear-gradient(135deg, rgba(52, 152, 219, 0.2) 0%, rgba(41, 128, 185, 0.2) 100%);
+        border-left: 4px solid #3498db;
+        position: relative;
+    }
+
+    .personnel-item.reemplazo::before {
+        content: "↻";
+        position: absolute;
+        left: -25px;
+        font-size: 1.2rem;
+        color: #3498db;
+    }
+
+    /* ========================================
        ✨ TABLA DE HISTORIAL DE CICLOS
        ======================================== */
     .tabla-historial {
@@ -149,7 +293,7 @@
     }
 
     /* ========================================
-       ESTILOS EXISTENTES
+       ESTILOS EXISTENTES (continuación)
        ======================================== */
     .calendar-widget {
         background: white;
@@ -570,6 +714,22 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- 🆕 Botones de Comisiones -->
+                <div class="d-flex gap-2 justify-content-end mt-3">
+                    <button type="button" class="btn btn-warning" id="btnVerComisionesActivas">
+                        <i class="bi bi-airplane"></i> Comisiones Activas
+                    </button>
+                    <button type="button" class="btn btn-success" id="btnVerCompensaciones">
+                        <i class="bi bi-gift"></i> Compensaciones
+                    </button>
+
+                    <!-- 🆕 NUEVO BOTÓN PARA REGISTRAR -->
+                    <button type="button" class="btn btn-orange" id="btnRegistrarComisionDirecto"
+                        style="background: #f39c12; color: white; font-weight: 600;">
+                        <i class="bi bi-airplane-fill"></i> Registrar Comisión
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -587,10 +747,15 @@
         </div>
     </div>
 
-    <!-- ✨ BOTÓN FLOTANTE HORIZONTAL -->
+    <!-- ✨ BOTÓN FLOTANTE HORIZONTAL (Historial) -->
     <button class="fab-button" id="fabHistorial">
         <i class="bi bi-clock-history"></i>
         <span>Consultar Ciclos Generados</span>
+    </button>
+
+    <!-- 🆕 BOTÓN FLOTANTE DE COMISIONES -->
+    <button class="btn-comision-flotante" id="btnComisionFlotante" title="Registrar Comisión">
+        <i class="bi bi-airplane-fill"></i>
     </button>
 
     <!-- ✨ MODAL DE HISTORIAL CON TABLA -->
@@ -743,6 +908,206 @@
                     </button>
                     <button type="button" class="btn btn-generate" id="btnConfirmarGeneracion">
                         <i class="bi bi-lightning-charge-fill"></i> Generar Ciclo
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         🆕 MODAL DE COMISIONES OFICIALES
+         ======================================== -->
+    <div class="modal fade" id="modalComision" tabindex="-1" aria-labelledby="modalComisionLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); color: white;">
+                    <h5 class="modal-title" id="modalComisionLabel">
+                        <i class="bi bi-airplane-fill"></i> Registrar Comisión Oficial
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <!-- Alerta informativa -->
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle-fill"></i>
+                        <strong>Sistema de Reemplazos Inteligente:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li>El sistema buscará automáticamente reemplazos siguiendo criterios de equidad</li>
+                            <li>Se priorizará a personal con menos servicios y que no trabajó ayer</li>
+                            <li>Quien reemplace ganará prioridad para futuros descansos</li>
+                            <li>Se respetarán los descansos programados</li>
+                        </ul>
+                    </div>
+
+                    <form id="formComision">
+                        <!-- Selección de Personal -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">
+                                <i class="bi bi-person-fill"></i> Personal a Comisionar *
+                            </label>
+                            <select class="form-select form-select-lg" id="personalComision" required>
+                                <option value="">Seleccione el personal...</option>
+                                <!-- Se llena dinámicamente -->
+                            </select>
+                            <small class="text-muted">Personal activo disponible</small>
+                        </div>
+
+                        <!-- Fechas -->
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">
+                                    <i class="bi bi-calendar-event"></i> Fecha Inicio *
+                                </label>
+                                <input type="date" class="form-control form-control-lg" id="fechaInicioComision" required>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">
+                                    <i class="bi bi-calendar-check"></i> Fecha Fin *
+                                </label>
+                                <input type="date" class="form-control form-control-lg" id="fechaFinComision" required>
+                            </div>
+                        </div>
+
+                        <!-- Destino -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">
+                                <i class="bi bi-geo-alt-fill"></i> Destino
+                            </label>
+                            <input type="text" class="form-control" id="destinoComision"
+                                value="Ciudad Capital" placeholder="Ciudad Capital">
+                            <small class="text-muted">Lugar de la comisión</small>
+                        </div>
+
+                        <!-- Número de Oficio -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">
+                                <i class="bi bi-file-earmark-text-fill"></i> Número de Oficio/Documento *
+                            </label>
+                            <input type="text" class="form-control form-control-lg" id="numeroOficio"
+                                placeholder="Ej: 123-2025-BHR" required>
+                            <small class="text-muted">
+                                <i class="bi bi-shield-fill-check"></i>
+                                <strong>Requerido para trazabilidad</strong> - Debe ser único
+                            </small>
+                        </div>
+
+                        <!-- Motivo -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">
+                                <i class="bi bi-chat-left-text-fill"></i> Motivo (Opcional)
+                            </label>
+                            <textarea class="form-control" id="motivoComision" rows="3"
+                                placeholder="Ej: Envío de correspondencia a Ciudad Capital"></textarea>
+                        </div>
+
+                        <!-- Vista previa de servicios afectados -->
+                        <div id="serviciosAfectadosPreview" style="display: none;">
+                            <div class="alert alert-warning">
+                                <h6 class="alert-heading">
+                                    <i class="bi bi-exclamation-triangle-fill"></i>
+                                    Servicios que serán reemplazados:
+                                </h6>
+                                <hr>
+                                <div id="listaServiciosAfectados" class="mb-0"></div>
+                            </div>
+                        </div>
+
+                        <!-- Resumen de días -->
+                        <div id="resumenDiasComision" style="display: none;">
+                            <div class="alert alert-primary">
+                                <strong><i class="bi bi-calendar-range"></i> Duración total:</strong>
+                                <span id="totalDiasComision" class="fs-5 fw-bold"></span> días
+                                <div class="mt-2" id="alertaCompensacion" style="display: none;">
+                                    <i class="bi bi-gift-fill"></i>
+                                    <small>
+                                        <strong>Comisión larga (10+ días):</strong>
+                                        El personal recibirá prioridad adicional al regresar
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-circle"></i> Cancelar
+                    </button>
+                    <button type="button" class="btn btn-warning btn-lg" id="btnRegistrarComision">
+                        <i class="bi bi-check-circle-fill"></i> Registrar Comisión
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         🆕 MODAL DE COMISIONES ACTIVAS
+         ======================================== -->
+    <div class="modal fade" id="modalComisionesActivas" tabindex="-1" aria-labelledby="modalComisionesActivasLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #e67e22 0%, #d35400 100%); color: white;">
+                    <h5 class="modal-title" id="modalComisionesActivasLabel">
+                        <i class="bi bi-airplane"></i> Comisiones Activas
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <div id="contenedorComisionesActivas">
+                        <!-- Se llena dinámicamente -->
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-warning" role="status">
+                                <span class="visually-hidden">Cargando...</span>
+                            </div>
+                            <p class="mt-3">Cargando comisiones activas...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-circle"></i> Cerrar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         🆕 MODAL DE PERSONAL CON COMPENSACIONES
+         ======================================== -->
+    <div class="modal fade" id="modalCompensaciones" tabindex="-1" aria-labelledby="modalCompensacionesLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #27ae60 0%, #229954 100%); color: white;">
+                    <h5 class="modal-title" id="modalCompensacionesLabel">
+                        <i class="bi bi-gift-fill"></i> Personal con Compensaciones Pendientes
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <div class="alert alert-success">
+                        <i class="bi bi-info-circle-fill"></i>
+                        <strong>Sistema de Compensaciones:</strong>
+                        <p class="mb-0">
+                            El personal que reemplaza a otros en comisión recibe <strong>prioridad automática</strong>
+                            para futuros servicios. Esto asegura equidad en la carga de trabajo.
+                        </p>
+                    </div>
+
+                    <div id="contenedorCompensaciones">
+                        <!-- Se llena dinámicamente -->
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-circle"></i> Cerrar
                     </button>
                 </div>
             </div>
