@@ -333,6 +333,540 @@ class AsignacionController
             ], JSON_UNESCAPED_UNICODE);
         }
     }
+    /**
+     * 🆕 API: Obtener compensaciones de un personal
+     */
+    public static function compensacionesPersonalAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        $id_personal = $_GET['id_personal'] ?? null;
+
+        if (!$id_personal) {
+            http_response_code(400);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Debe proporcionar el ID del personal'
+            ], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+
+        try {
+            // Obtener compensaciones pendientes
+            $compensaciones_pendientes = AsignacionServicio::fetchArray(
+                "SELECT 
+                ch.id_compensacion,
+                ch.fecha_servicio,
+                ch.puntos_compensacion,
+                ch.estado,
+                ch.motivo,
+                ch.created_at,
+                ts.nombre as servicio,
+                co.numero_oficio,
+                co.destino,
+                co.fecha_inicio as comision_inicio,
+                co.fecha_fin as comision_fin
+             FROM compensaciones_historial ch
+             INNER JOIN tipos_servicio ts ON ch.id_tipo_servicio = ts.id_tipo_servicio
+             LEFT JOIN comisiones_oficiales co ON ch.id_comision = co.id_comision
+             WHERE ch.id_personal = :id_personal
+             AND ch.estado = 'PENDIENTE'
+             ORDER BY ch.created_at ASC",
+                [':id_personal' => $id_personal]
+            );
+
+            // Obtener compensaciones aplicadas
+            $compensaciones_aplicadas = AsignacionServicio::fetchArray(
+                "SELECT 
+                ch.id_compensacion,
+                ch.fecha_servicio,
+                ch.puntos_compensacion,
+                ch.estado,
+                ch.motivo,
+                ch.fecha_aplicacion,
+                ch.created_at,
+                ts.nombre as servicio,
+                co.numero_oficio,
+                CONCAT(u.nombre, ' ', u.apellido) as aplicada_por_nombre
+             FROM compensaciones_historial ch
+             INNER JOIN tipos_servicio ts ON ch.id_tipo_servicio = ts.id_tipo_servicio
+             LEFT JOIN comisiones_oficiales co ON ch.id_comision = co.id_comision
+             LEFT JOIN usuarios u ON ch.aplicada_por = u.id
+             WHERE ch.id_personal = :id_personal
+             AND ch.estado = 'APLICADA'
+             ORDER BY ch.fecha_aplicacion DESC
+             LIMIT 10",
+                [':id_personal' => $id_personal]
+            );
+
+            // Calcular total de puntos
+            $total_puntos = array_sum(array_column($compensaciones_pendientes, 'puntos_compensacion'));
+
+            // Obtener info del historial
+            $historial = AsignacionServicio::fetchFirst(
+                "SELECT 
+                servicios_como_reemplazo,
+                compensacion_pendiente,
+                puntos_compensacion_acumulados
+             FROM historial_rotaciones
+             WHERE id_personal = :id_personal
+             LIMIT 1",
+                [':id_personal' => $id_personal]
+            );
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Compensaciones obtenidas',
+                'data' => [
+                    'compensaciones_pendientes' => $compensaciones_pendientes,
+                    'compensaciones_aplicadas' => $compensaciones_aplicadas,
+                    'total_puntos_pendientes' => $total_puntos,
+                    'total_reemplazos' => $historial['servicios_como_reemplazo'] ?? 0,
+                    'tiene_compensacion_pendiente' => ($historial['compensacion_pendiente'] ?? false) ? true : false
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en compensacionesPersonalAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al obtener compensaciones',
+                'detalle' => $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+
+    /**
+     * 🆕 API: Verificar disponibilidad para aplicar compensación
+     */
+    public static function verificarCompensacionAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        $id_personal = $_GET['id_personal'] ?? null;
+        $fecha = $_GET['fecha'] ?? null;
+
+        if (!$id_personal || !$fecha) {
+            http_response_code(400);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Debe proporcionar el ID del personal y la fecha'
+            ], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+
+        try {
+            // 1. Verificar puntos disponibles
+            $compensaciones = AsignacionServicio::fetchFirst(
+                "SELECT SUM(puntos_compensacion) as total_puntos
+             FROM compensaciones_historial
+             WHERE id_personal = :id_personal
+             AND estado = 'PENDIENTE'",
+                [':id_personal' => $id_personal]
+            );
+
+            $puntos_disponibles = $compensaciones['total_puntos'] ?? 0;
+
+            // 2. Obtener servicios en esa fecha
+            $servicios_fecha = AsignacionServicio::fetchArray(
+                "SELECT 
+                a.id_asignacion,
+                ts.nombre as servicio,
+                ts.id_tipo_servicio,
+                a.hora_inicio,
+                a.hora_fin,
+                a.estado
+             FROM asignaciones_servicio a
+             INNER JOIN tipos_servicio ts ON a.id_tipo_servicio = ts.id_tipo_servicio
+             WHERE a.id_personal = :id_personal
+             AND a.fecha_servicio = :fecha
+             AND a.estado = 'PROGRAMADO'",
+                [
+                    ':id_personal' => $id_personal,
+                    ':fecha' => $fecha
+                ]
+            );
+
+            if (empty($servicios_fecha)) {
+                http_response_code(200);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'No tiene servicios asignados en esa fecha',
+                    'puede_aplicar' => false,
+                    'puntos_disponibles' => $puntos_disponibles,
+                    'puntos_necesarios' => 0,
+                    'servicios' => []
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            // 3. Calcular puntos necesarios
+            $puntos_necesarios = 0;
+            foreach ($servicios_fecha as &$serv) {
+                $puntos_servicio = AsignacionServicio::calcularPuntosCompensacion($serv['servicio']);
+                $serv['puntos'] = $puntos_servicio;
+                $puntos_necesarios += $puntos_servicio;
+            }
+
+            $puede_aplicar = ($puntos_disponibles >= $puntos_necesarios);
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => $puede_aplicar ? 'Puede aplicar compensación' : 'No tiene suficientes puntos',
+                'puede_aplicar' => $puede_aplicar,
+                'puntos_disponibles' => $puntos_disponibles,
+                'puntos_necesarios' => $puntos_necesarios,
+                'puntos_restantes' => max(0, $puntos_disponibles - $puntos_necesarios),
+                'servicios' => $servicios_fecha
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en verificarCompensacionAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al verificar compensación',
+                'detalle' => $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    /**
+     * 🆕 API: Aplicar compensación
+     */
+    public static function aplicarCompensacionAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $id_personal = $_POST['id_personal'] ?? null;
+            $fecha = $_POST['fecha'] ?? null;
+            $usuario_id = $_SESSION['user_id'] ?? $_SESSION['id'] ?? 1;
+
+            if (!$id_personal || !$fecha) {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'Debe proporcionar el ID del personal y la fecha'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            // Validar formato de fecha
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha)) {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'Formato de fecha inválido'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            // Verificar que la fecha no sea pasada
+            if (strtotime($fecha) < strtotime(date('Y-m-d'))) {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'No se puede aplicar compensación en fechas pasadas'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            error_log("💰 Aplicando compensación - Personal: {$id_personal}, Fecha: {$fecha}");
+
+            $resultado = AsignacionServicio::aplicarCompensacion($id_personal, $fecha, $usuario_id);
+
+            if ($resultado['exito']) {
+                http_response_code(200);
+                echo json_encode([
+                    'codigo' => 1,
+                    'mensaje' => $resultado['mensaje'],
+                    'data' => [
+                        'puntos_gastados' => $resultado['puntos_gastados'],
+                        'puntos_restantes' => $resultado['puntos_restantes'],
+                        'servicios_cancelados' => $resultado['servicios_cancelados']
+                    ]
+                ], JSON_UNESCAPED_UNICODE);
+            } else {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => $resultado['mensaje']
+                ], JSON_UNESCAPED_UNICODE);
+            }
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en aplicarCompensacionAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al aplicar compensación',
+                'detalle' => $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+
+    /**
+     * 🆕 API: Listar personal con compensaciones (ya existe pero la mejoramos)
+     */
+    public static function personalConCompensacionAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $personal = AsignacionServicio::fetchArray(
+                "SELECT 
+                p.id_personal,
+                CONCAT(p.nombres, ' ', p.apellidos) as nombre_completo,
+                g.nombre as grado,
+                p.tipo as tipo_personal,
+
+                -- Total de veces que ha sido reemplazo
+                (SELECT COUNT(*) 
+                 FROM reemplazos_servicio rs 
+                 WHERE rs.id_personal_reemplazo = p.id_personal
+                ) as total_reemplazos,
+
+                -- ✅ Compensaciones pendientes (ADAPTADO)
+                (SELECT COUNT(*) 
+                 FROM compensaciones_historial ch 
+                 WHERE ch.id_personal = p.id_personal 
+                 AND ch.estado = 'PENDIENTE'
+                ) as compensaciones_pendientes,
+
+                -- ✅ Suma de puntos pendientes (de JSON en notas)
+                (SELECT COALESCE(SUM(
+                    CAST(JSON_EXTRACT(notas, '$.puntos') AS UNSIGNED)
+                ), 0)
+                 FROM compensaciones_historial ch2 
+                 WHERE ch2.id_personal = p.id_personal 
+                 AND ch2.estado = 'PENDIENTE'
+                ) as total_puntos_pendientes,
+
+                -- Compensaciones aplicadas
+                (SELECT COUNT(*) 
+                 FROM compensaciones_historial ch3 
+                 WHERE ch3.id_personal = p.id_personal 
+                 AND ch3.estado = 'APLICADA'
+                ) as compensaciones_aplicadas
+
+             FROM bhr_personal p
+             INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+             WHERE p.activo = 1
+             -- Solo mostrar quien tiene compensaciones pendientes o ha sido reemplazo
+             AND (
+                 EXISTS (
+                     SELECT 1 FROM compensaciones_historial ch 
+                     WHERE ch.id_personal = p.id_personal 
+                     AND ch.estado = 'PENDIENTE'
+                 )
+                 OR EXISTS (
+                     SELECT 1 FROM reemplazos_servicio rs 
+                     WHERE rs.id_personal_reemplazo = p.id_personal
+                 )
+             )
+             ORDER BY 
+                compensaciones_pendientes DESC,
+                total_reemplazos DESC",
+                []
+            );
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Personal con compensaciones obtenido',
+                'total' => count($personal),
+                'personal' => $personal
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en personalConCompensacionAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al obtener personal',
+                'detalle' => $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    /**
+     * 🆕 API: Historial completo de compensaciones
+     */
+    public static function historialCompensacionesAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        $limite = $_GET['limite'] ?? 50;
+        $estado = $_GET['estado'] ?? null; // 'PENDIENTE', 'APLICADA', o null para todas
+
+        try {
+            $filtro_estado = '';
+            $params = [':limite' => (int)$limite];
+
+            if ($estado && in_array($estado, ['PENDIENTE', 'APLICADA'])) {
+                $filtro_estado = "AND ch.estado = :estado";
+                $params[':estado'] = $estado;
+            }
+
+            $compensaciones = AsignacionServicio::fetchArray(
+                "SELECT 
+                ch.id_compensacion,
+                ch.fecha_servicio,
+                ch.puntos_compensacion,
+                ch.estado,
+                ch.motivo,
+                ch.created_at,
+                ch.fecha_aplicacion,
+                CONCAT(p.nombres, ' ', p.apellidos) as nombre_completo,
+                g.nombre as grado,
+                p.tipo as tipo_personal,
+                ts.nombre as servicio,
+                co.numero_oficio,
+                co.destino,
+                CONCAT(u.nombre, ' ', u.apellido) as aplicada_por
+             FROM compensaciones_historial ch
+             INNER JOIN bhr_personal p ON ch.id_personal = p.id_personal
+             INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+             INNER JOIN tipos_servicio ts ON ch.id_tipo_servicio = ts.id_tipo_servicio
+             LEFT JOIN comisiones_oficiales co ON ch.id_comision = co.id_comision
+             LEFT JOIN usuarios u ON ch.aplicada_por = u.id
+             WHERE 1=1
+             {$filtro_estado}
+             ORDER BY ch.created_at DESC
+             LIMIT :limite",
+                $params
+            );
+
+            // Estadísticas generales
+            $estadisticas = AsignacionServicio::fetchFirst(
+                "SELECT 
+                COUNT(*) as total_compensaciones,
+                SUM(CASE WHEN estado = 'PENDIENTE' THEN 1 ELSE 0 END) as pendientes,
+                SUM(CASE WHEN estado = 'APLICADA' THEN 1 ELSE 0 END) as aplicadas,
+                SUM(CASE WHEN estado = 'PENDIENTE' THEN puntos_compensacion ELSE 0 END) as puntos_pendientes_total,
+                SUM(CASE WHEN estado = 'APLICADA' THEN puntos_compensacion ELSE 0 END) as puntos_aplicados_total
+             FROM compensaciones_historial",
+                []
+            );
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Historial obtenido',
+                'compensaciones' => $compensaciones,
+                'estadisticas' => $estadisticas
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en historialCompensacionesAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al obtener historial',
+                'detalle' => $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    /**
+     * 🆕 API: Cancelar compensación aplicada (revertir)
+     */
+    public static function cancelarCompensacionAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $id_compensacion = $_POST['id_compensacion'] ?? null;
+            $usuario_id = $_SESSION['user_id'] ?? $_SESSION['id'] ?? 1;
+
+            if (!$id_compensacion) {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'Debe proporcionar el ID de la compensación'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            AsignacionServicio::beginTransaction();
+
+            // Obtener info de la compensación
+            $compensacion = AsignacionServicio::fetchFirst(
+                "SELECT * FROM compensaciones_historial WHERE id_compensacion = :id",
+                [':id' => $id_compensacion]
+            );
+
+            if (!$compensacion) {
+                throw new \Exception('Compensación no encontrada');
+            }
+
+            if ($compensacion['estado'] !== 'APLICADA') {
+                throw new \Exception('Solo se pueden cancelar compensaciones aplicadas');
+            }
+
+            // 1. Revertir estado de compensación
+            AsignacionServicio::ejecutarQuery(
+                "UPDATE compensaciones_historial
+             SET estado = 'PENDIENTE',
+                 fecha_aplicacion = NULL,
+                 aplicada_por = NULL
+             WHERE id_compensacion = :id",
+                [':id' => $id_compensacion]
+            );
+
+            // 2. Restaurar servicios cancelados
+            AsignacionServicio::ejecutarQuery(
+                "UPDATE asignaciones_servicio
+             SET estado = 'PROGRAMADO',
+                 observaciones = REPLACE(observaciones, ' - COMPENSADO POR REEMPLAZOS', '')
+             WHERE id_personal = :id_personal
+             AND fecha_servicio = :fecha
+             AND estado = 'COMPENSADO'",
+                [
+                    ':id_personal' => $compensacion['id_personal'],
+                    ':fecha' => $compensacion['fecha_aplicacion']
+                ]
+            );
+
+            // 3. Actualizar historial
+            AsignacionServicio::ejecutarQuery(
+                "UPDATE historial_rotaciones
+             SET compensacion_pendiente = TRUE,
+                 puntos_compensacion_acumulados = puntos_compensacion_acumulados + :puntos
+             WHERE id_personal = :id_personal",
+                [
+                    ':puntos' => $compensacion['puntos_compensacion'],
+                    ':id_personal' => $compensacion['id_personal']
+                ]
+            );
+
+            AsignacionServicio::commit();
+
+            error_log("✅ Compensación {$id_compensacion} cancelada exitosamente");
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => 'Compensación cancelada y servicios restaurados exitosamente'
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            AsignacionServicio::rollback();
+            error_log("❌ ERROR en cancelarCompensacionAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al cancelar compensación',
+                'detalle' => $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
 
     // ========================================
     // 🆕 ENDPOINTS DE COMISIONES
@@ -518,33 +1052,6 @@ class AsignacionController
             ], JSON_UNESCAPED_UNICODE);
         } catch (\Exception $e) {
             error_log("❌ ERROR en comisionesActivasAPI: " . $e->getMessage());
-
-            http_response_code(500);
-            echo json_encode([
-                'codigo' => 0,
-                'mensaje' => 'Error: ' . $e->getMessage()
-            ], JSON_UNESCAPED_UNICODE);
-        }
-    }
-
-    /**
-     * 🆕 API: Obtener personal con compensaciones pendientes
-     */
-    public static function personalConCompensacionAPI()
-    {
-        header('Content-Type: application/json; charset=UTF-8');
-
-        try {
-            $personal = AsignacionServicio::obtenerPersonalConCompensacion();
-
-            http_response_code(200);
-            echo json_encode([
-                'codigo' => 1,
-                'mensaje' => 'Personal con compensaciones',
-                'personal' => $personal
-            ], JSON_UNESCAPED_UNICODE);
-        } catch (\Exception $e) {
-            error_log("❌ ERROR en personalConCompensacionAPI: " . $e->getMessage());
 
             http_response_code(500);
             echo json_encode([

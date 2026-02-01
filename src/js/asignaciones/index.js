@@ -1586,7 +1586,7 @@ const registrarComision = async () => {
         title: '¿Registrar comisión oficial?',
         html: `
             <div style="text-align: left;">
-                <p><strong>Personal:</strong> ${personalComision.options[personalComision.selectedIndex].text}</p>
+                <p><strong>Persona:</strong> ${personalComision.options[personalComision.selectedIndex].text}</p>
                 <p><strong>Destino:</strong> ${datos.destino}</p>
                 <p><strong>Fechas:</strong> ${formatearFecha(datos.fecha_inicio)} al ${formatearFecha(datos.fecha_fin)}</p>
                 <p><strong>Oficio:</strong> ${datos.numero_oficio}</p>
@@ -1883,7 +1883,7 @@ const cargarPersonalConCompensacion = async () => {
                                     ${p.grado} ${p.nombre_completo}
                                 </h6>
                                 <small class="text-muted">
-                                    Ha sido reemplazo ${p.servicios_como_reemplazo} veces
+                                    Ha sido reemplazo ${p.total_reemplazos || 0} veces
                                 </small>
                             </div>
                             <div>

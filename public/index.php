@@ -41,6 +41,31 @@ $router->get('/API/asignaciones/comisiones-activas', [AsignacionController::clas
 $router->get('/API/asignaciones/personal-con-compensacion', [AsignacionController::class, 'personalConCompensacionAPI']);
 
 
+
+
+// ========================================
+// 🆕 RUTAS DE COMPENSACIONES
+// ========================================
+
+// Obtener compensaciones de un personal
+$router->get('/asignaciones/compensaciones/personal', [AsignacionController::class, 'compensacionesPersonalAPI']);
+
+// Verificar si puede aplicar compensación
+$router->get('/asignaciones/compensaciones/verificar', [AsignacionController::class, 'verificarCompensacionAPI']);
+
+// Aplicar compensación
+$router->post('/asignaciones/compensaciones/aplicar', [AsignacionController::class, 'aplicarCompensacionAPI']);
+
+// Listar personal con compensaciones
+$router->get('/asignaciones/compensaciones/personal-lista', [AsignacionController::class, 'personalConCompensacionAPI']);
+
+// Historial de compensaciones
+$router->get('/asignaciones/compensaciones/historial', [AsignacionController::class, 'historialCompensacionesAPI']);
+
+// Cancelar compensación (revertir)
+$router->post('/asignaciones/compensaciones/cancelar', [AsignacionController::class, 'cancelarCompensacionAPI']);
+
+
 // Agregar la ruta (en la sección donde defines las rutas)
 $router->get('/API/personal/activos', [PersonalController::class, 'obtenerActivosAPI']);
 

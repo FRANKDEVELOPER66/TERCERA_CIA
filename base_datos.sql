@@ -874,7 +874,7 @@ CREATE TABLE `reemplazos_servicio` (
   CONSTRAINT `reemplazos_servicio_ibfk_5` FOREIGN KEY (`id_tipo_servicio`) REFERENCES `tipos_servicio` (`id_tipo_servicio`) ON DELETE RESTRICT
 ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-tipos_servicioCREATE TABLE `tipos_servicio` (
+CREATE TABLE `tipos_servicio` (
   `id_tipo_servicio` int NOT NULL AUTO_INCREMENT,
   `nombre` varchar(50) NOT NULL,
   `descripcion` text,
