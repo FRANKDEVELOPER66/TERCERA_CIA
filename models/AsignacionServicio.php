@@ -2123,6 +2123,9 @@ class AsignacionServicio extends ActiveRecord
         $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
         $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
 
+        // 🆕 Calcular fecha de ayer
+        $fecha_ayer = date('Y-m-d', strtotime($fecha . ' -1 day'));
+
         error_log("🌙 === ASIGNANDO SERVICIO NOCTURNO ===");
 
         $params = [
@@ -2136,7 +2139,8 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_inicio_count2' => $fecha_inicio_ciclo,
             ':fecha_fin_count2' => $fecha_fin_ciclo,
             ':fecha_cuartelero' => $fecha,
-            ':fecha_comision' => $fecha
+            ':fecha_comision' => $fecha,
+            ':fecha_ayer' => $fecha_ayer  // 🆕 Para excluir quien hizo nocturno ayer
         ];
 
         $filtro_grupos = self::construirFiltroGrupos($params);
@@ -2199,6 +2203,15 @@ class AsignacionServicio extends ActiveRecord
             WHERE co.id_personal = p.id_personal
             AND co.estado = 'ACTIVA'
             AND :fecha_comision BETWEEN co.fecha_inicio AND co.fecha_fin
+        )
+        -- 🆕 CRÍTICO: NO puede haber hecho SERVICIO NOCTURNO AYER
+        AND p.id_personal NOT IN (
+            SELECT a_ayer.id_personal 
+            FROM asignaciones_servicio a_ayer
+            INNER JOIN tipos_servicio ts_ayer ON a_ayer.id_tipo_servicio = ts_ayer.id_tipo_servicio
+            WHERE a_ayer.fecha_servicio = :fecha_ayer
+            AND ts_ayer.nombre = 'SERVICIO NOCTURNO'
+            AND a_ayer.estado = 'PROGRAMADO'
         )
     ORDER BY 
         nocturnos_ciclo ASC,
