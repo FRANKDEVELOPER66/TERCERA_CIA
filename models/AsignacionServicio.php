@@ -637,10 +637,14 @@ class AsignacionServicio extends ActiveRecord
         $fecha_inicio_ciclo,
         $fecha_fin_ciclo,
         $grados_permitidos,
-        $nombre_servicio  // ✅ Nuevo parámetro
+        $nombre_servicio
     ) {
+        // 🆕 Calcular fecha de ayer
+        $fecha_ayer = date('Y-m-d', strtotime($fecha_servicio . ' -1 day'));
+
         $params = [
             ':fecha' => $fecha_servicio,
+            ':fecha_ayer' => $fecha_ayer,
             ':tipo' => $tipo_busqueda,
             ':id_comisionado' => $id_comisionado,
             ':fecha_inicio_ciclo' => $fecha_inicio_ciclo,
@@ -667,29 +671,52 @@ class AsignacionServicio extends ActiveRecord
         // ✅ Construir filtro de grupos
         $filtro_grupos = self::construirFiltroGrupos($params);
 
-        // ✅ RESTRICCIÓN TACTICO/ERI usando el parámetro recibido (sin $GLOBALS)
-        $filtro_tactico_eri = "";
+        // 🆕 CRÍTICO: Excluir quien hizo SERVICIO NOCTURNO o CUARTELERO ayer (incluso en emergencia)
+        $filtro_nocturno_ayer = '';
+        if ($nombre_servicio === 'SERVICIO NOCTURNO') {
+            $filtro_nocturno_ayer = "
+        AND p.id_personal NOT IN (
+            SELECT a_ayer.id_personal 
+            FROM asignaciones_servicio a_ayer
+            INNER JOIN tipos_servicio ts_ayer ON a_ayer.id_tipo_servicio = ts_ayer.id_tipo_servicio
+            WHERE a_ayer.fecha_servicio = :fecha_ayer
+            AND (ts_ayer.nombre = 'SERVICIO NOCTURNO' OR ts_ayer.nombre = 'CUARTELERO')
+            AND a_ayer.estado = 'PROGRAMADO'
+        )";
+        } elseif ($nombre_servicio === 'CUARTELERO') {
+            $filtro_nocturno_ayer = "
+        AND p.id_personal NOT IN (
+            SELECT a_ayer.id_personal 
+            FROM asignaciones_servicio a_ayer
+            INNER JOIN tipos_servicio ts_ayer ON a_ayer.id_tipo_servicio = ts_ayer.id_tipo_servicio
+            WHERE a_ayer.fecha_servicio = :fecha_ayer
+            AND (ts_ayer.nombre = 'SERVICIO NOCTURNO' OR ts_ayer.nombre = 'CUARTELERO')
+            AND a_ayer.estado = 'PROGRAMADO'
+        )";
+        }
 
+        // ✅ RESTRICCIÓN TACTICO/ERI
+        $filtro_tactico_eri = "";
         if ($nombre_servicio === 'TACTICO') {
             $filtro_tactico_eri = "
-            AND p.id_personal NOT IN (
-                SELECT a_eri.id_personal 
-                FROM asignaciones_servicio a_eri
-                INNER JOIN tipos_servicio ts_eri ON a_eri.id_tipo_servicio = ts_eri.id_tipo_servicio
-                WHERE a_eri.fecha_servicio = :fecha_sub1
-                AND ts_eri.nombre = 'RECONOCIMIENTO'
-                AND a_eri.estado = 'PROGRAMADO'
-            )";
+        AND p.id_personal NOT IN (
+            SELECT a_eri.id_personal 
+            FROM asignaciones_servicio a_eri
+            INNER JOIN tipos_servicio ts_eri ON a_eri.id_tipo_servicio = ts_eri.id_tipo_servicio
+            WHERE a_eri.fecha_servicio = :fecha_sub1
+            AND ts_eri.nombre = 'RECONOCIMIENTO'
+            AND a_eri.estado = 'PROGRAMADO'
+        )";
         } elseif ($nombre_servicio === 'RECONOCIMIENTO') {
             $filtro_tactico_eri = "
-            AND p.id_personal NOT IN (
-                SELECT a_tac.id_personal 
-                FROM asignaciones_servicio a_tac
-                INNER JOIN tipos_servicio ts_tac ON a_tac.id_tipo_servicio = ts_tac.id_tipo_servicio
-                WHERE a_tac.fecha_servicio = :fecha_sub1
-                AND ts_tac.nombre = 'TACTICO'
-                AND a_tac.estado = 'PROGRAMADO'
-            )";
+        AND p.id_personal NOT IN (
+            SELECT a_tac.id_personal 
+            FROM asignaciones_servicio a_tac
+            INNER JOIN tipos_servicio ts_tac ON a_tac.id_tipo_servicio = ts_tac.id_tipo_servicio
+            WHERE a_tac.fecha_servicio = :fecha_sub1
+            AND ts_tac.nombre = 'TACTICO'
+            AND a_tac.estado = 'PROGRAMADO'
+        )";
         }
 
         $sql = "SELECT 
@@ -727,6 +754,7 @@ class AsignacionServicio extends ActiveRecord
         {$filtro_grados}
         {$filtro_grupos}
         {$filtro_tactico_eri}
+        {$filtro_nocturno_ayer}
         -- No puede tener servicio ESE MISMO DÍA
         AND (SELECT COUNT(*) FROM asignaciones_servicio a1
              WHERE a1.id_personal = p.id_personal 
@@ -767,7 +795,7 @@ class AsignacionServicio extends ActiveRecord
         $grados_permitidos,
         $max_servicios,
         $excluir_nocturno_ayer,
-        $nombre_servicio  // ✅ Nuevo parámetro
+        $nombre_servicio
     ) {
         $params = [
             ':fecha' => $fecha_servicio,
@@ -802,39 +830,54 @@ class AsignacionServicio extends ActiveRecord
         // ✅ Construir filtro de grupos
         $filtro_grupos = self::construirFiltroGrupos($params);
 
-        // Filtro de nocturno ayer
-        $filtro_nocturno = $excluir_nocturno_ayer ?
-            "AND (SELECT COUNT(*) FROM asignaciones_servicio a2
-             INNER JOIN tipos_servicio ts2 ON a2.id_tipo_servicio = ts2.id_tipo_servicio
-             WHERE a2.id_personal = p.id_personal 
-             AND a2.fecha_servicio = :fecha_sub2_ayer
-             AND ts2.nombre = 'SERVICIO NOCTURNO'
-             AND a2.estado = 'PROGRAMADO'
-        ) = 0" : "";
+        // 🆕 Filtro de nocturno/cuartelero ayer - SOLO si se solicita excluir
+        $filtro_nocturno = '';
+        if ($excluir_nocturno_ayer) {
+            if ($nombre_servicio === 'SERVICIO NOCTURNO') {
+                // Si estamos buscando para NOCTURNO, excluir quien hizo NOCTURNO o CUARTELERO ayer
+                $filtro_nocturno = "
+            AND p.id_personal NOT IN (
+                SELECT a2.id_personal FROM asignaciones_servicio a2
+                INNER JOIN tipos_servicio ts2 ON a2.id_tipo_servicio = ts2.id_tipo_servicio
+                WHERE a2.fecha_servicio = :fecha_sub2_ayer
+                AND (ts2.nombre = 'SERVICIO NOCTURNO' OR ts2.nombre = 'CUARTELERO')
+                AND a2.estado = 'PROGRAMADO'
+            )";
+            } elseif ($nombre_servicio === 'CUARTELERO') {
+                // Si estamos buscando para CUARTELERO, excluir quien hizo NOCTURNO o CUARTELERO ayer
+                $filtro_nocturno = "
+            AND p.id_personal NOT IN (
+                SELECT a2.id_personal FROM asignaciones_servicio a2
+                INNER JOIN tipos_servicio ts2 ON a2.id_tipo_servicio = ts2.id_tipo_servicio
+                WHERE a2.fecha_servicio = :fecha_sub2_ayer
+                AND (ts2.nombre = 'SERVICIO NOCTURNO' OR ts2.nombre = 'CUARTELERO')
+                AND a2.estado = 'PROGRAMADO'
+            )";
+            }
+        }
 
-        // ✅ RESTRICCIÓN TACTICO/ERI usando el parámetro recibido (sin $GLOBALS)
+        // ✅ RESTRICCIÓN TACTICO/ERI
         $filtro_tactico_eri = "";
-
         if ($nombre_servicio === 'TACTICO') {
             $filtro_tactico_eri = "
-            AND p.id_personal NOT IN (
-                SELECT a_eri.id_personal 
-                FROM asignaciones_servicio a_eri
-                INNER JOIN tipos_servicio ts_eri ON a_eri.id_tipo_servicio = ts_eri.id_tipo_servicio
-                WHERE a_eri.fecha_servicio = :fecha_sub1
-                AND ts_eri.nombre = 'RECONOCIMIENTO'
-                AND a_eri.estado = 'PROGRAMADO'
-            )";
+        AND p.id_personal NOT IN (
+            SELECT a_eri.id_personal 
+            FROM asignaciones_servicio a_eri
+            INNER JOIN tipos_servicio ts_eri ON a_eri.id_tipo_servicio = ts_eri.id_tipo_servicio
+            WHERE a_eri.fecha_servicio = :fecha_sub1
+            AND ts_eri.nombre = 'RECONOCIMIENTO'
+            AND a_eri.estado = 'PROGRAMADO'
+        )";
         } elseif ($nombre_servicio === 'RECONOCIMIENTO') {
             $filtro_tactico_eri = "
-            AND p.id_personal NOT IN (
-                SELECT a_tac.id_personal 
-                FROM asignaciones_servicio a_tac
-                INNER JOIN tipos_servicio ts_tac ON a_tac.id_tipo_servicio = ts_tac.id_tipo_servicio
-                WHERE a_tac.fecha_servicio = :fecha_sub1
-                AND ts_tac.nombre = 'TACTICO'
-                AND a_tac.estado = 'PROGRAMADO'
-            )";
+        AND p.id_personal NOT IN (
+            SELECT a_tac.id_personal 
+            FROM asignaciones_servicio a_tac
+            INNER JOIN tipos_servicio ts_tac ON a_tac.id_tipo_servicio = ts_tac.id_tipo_servicio
+            WHERE a_tac.fecha_servicio = :fecha_sub1
+            AND ts_tac.nombre = 'TACTICO'
+            AND a_tac.estado = 'PROGRAMADO'
+        )";
         }
 
         $sql = "SELECT 
@@ -864,6 +907,7 @@ class AsignacionServicio extends ActiveRecord
     LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
         AND :fecha_descanso BETWEEN cd.fecha_inicio AND cd.fecha_fin
     LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal
+    
     WHERE p.tipo = :tipo
         AND p.activo = 1
         AND p.id_personal != :id_comisionado
@@ -2017,6 +2061,9 @@ class AsignacionServicio extends ActiveRecord
         $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
         $fecha_fin_ciclo = date('Y-m-d', strtotime($fecha_inicio_ciclo . ' +9 days'));
 
+        // 🆕 Calcular fecha de ayer
+        $fecha_ayer = date('Y-m-d', strtotime($fecha . ' -1 day'));
+
         $params = [
             ':fecha' => $fecha,
             ':fecha2' => $fecha,
@@ -2026,7 +2073,8 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_fin' => $fecha_fin_ciclo,
             ':fecha_inicio_count' => $fecha_inicio_ciclo,
             ':fecha_fin_count' => $fecha_fin_ciclo,
-            ':fecha_comision' => $fecha
+            ':fecha_comision' => $fecha,
+            ':fecha_ayer' => $fecha_ayer  // 🆕 Para excluir quien hizo nocturno/cuartelero ayer
         ];
 
         $filtro_grupos = self::construirFiltroGrupos($params);
@@ -2074,6 +2122,15 @@ class AsignacionServicio extends ActiveRecord
             WHERE co.id_personal = p.id_personal
             AND co.estado = 'ACTIVA'
             AND :fecha_comision BETWEEN co.fecha_inicio AND co.fecha_fin
+        )
+        -- 🆕 CRÍTICO: NO puede haber hecho SERVICIO NOCTURNO o CUARTELERO AYER
+        AND p.id_personal NOT IN (
+            SELECT a_ayer.id_personal 
+            FROM asignaciones_servicio a_ayer
+            INNER JOIN tipos_servicio ts_ayer ON a_ayer.id_tipo_servicio = ts_ayer.id_tipo_servicio
+            WHERE a_ayer.fecha_servicio = :fecha_ayer
+            AND (ts_ayer.nombre = 'SERVICIO NOCTURNO' OR ts_ayer.nombre = 'CUARTELERO')
+            AND a_ayer.estado = 'PROGRAMADO'
         )
     ORDER BY 
         servicios_ese_dia ASC,

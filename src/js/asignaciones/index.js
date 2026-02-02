@@ -608,7 +608,7 @@ const manejarCambioFecha = async (mostrarAlertas = true) => {
             if (disponibilidad.proxima_fecha_disponible === fecha) {
                 Toast.fire({
                     icon: 'success',
-                    title: '✅ Fecha disponible - Próxima sugerida',
+                    title: 'Fecha disponible - Próxima sugerida',
                     timer: 3000
                 });
             } else {
