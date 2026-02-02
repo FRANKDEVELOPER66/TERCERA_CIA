@@ -1490,32 +1490,44 @@ class AsignacionServicio extends ActiveRecord
         $params = [
             ':fecha' => $fecha,
             ':fecha_inicio' => $fecha_inicio_ciclo,
-            ':fecha_fin' => $fecha_fin
+            ':fecha_fin' => $fecha_fin,
+            ':fecha_inicio_comision' => $fecha_inicio_ciclo,
+            ':fecha_fin_comision' => $fecha_fin
         ];
 
         $filtro_grupos = self::construirFiltroGrupos($params);
 
         $sql = "SELECT p.id_personal
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-        WHERE p.tipo = 'TROPA'
-            AND g.nombre = 'Sargento 1ro.'
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            {$filtro_grupos}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+    FROM bhr_personal p
+    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+    WHERE p.tipo = 'TROPA'
+        AND g.nombre = 'Sargento 1ro.'
+        AND p.activo = 1
+        AND cd.id_calendario IS NULL
+        {$filtro_grupos}
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM comisiones_oficiales co
+            WHERE co.id_personal = p.id_personal
+            AND co.estado = 'ACTIVA'
+            AND (
+                (co.fecha_inicio BETWEEN :fecha_inicio_comision AND :fecha_fin_comision)
+                OR (co.fecha_fin BETWEEN :fecha_inicio_comision AND :fecha_fin_comision)
+                OR (co.fecha_inicio <= :fecha_inicio_comision AND co.fecha_fin >= :fecha_fin_comision)
             )
-        ORDER BY 
-            COALESCE(hr.dias_desde_ultimo, 999) DESC,
-            RAND()
-        LIMIT 1";
+        )
+    ORDER BY 
+        COALESCE(hr.dias_desde_ultimo, 999) DESC,
+        RAND()
+    LIMIT 1";
 
         $resultado = self::fetchFirst($sql, $params);
 
@@ -1539,11 +1551,10 @@ class AsignacionServicio extends ActiveRecord
      */
     private static function asignarTactico($fecha, $usuario_id, $id_oficial = null)
     {
-        // Calcular inicio del ciclo actual
         $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio
-                            FROM asignaciones_servicio
-                            WHERE fecha_servicio <= :fecha
-                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
+                        FROM asignaciones_servicio
+                        WHERE fecha_servicio <= :fecha
+                        AND DATEDIFF(:fecha, fecha_servicio) < 10";
 
         $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
 
@@ -1561,43 +1572,59 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_fin' => $fecha_fin_ciclo,
             ':fecha_inicio_count' => $fecha_inicio_ciclo,
             ':fecha_fin_count' => $fecha_fin_ciclo,
-            ':fecha_cuartelero' => $fecha
+            ':fecha_cuartelero' => $fecha,
+            ':fecha_comision' => $fecha,
+            ':fecha_eri' => $fecha  // 🆕 Para excluir quien tiene RECONOCIMIENTO
         ];
 
         $filtro_grupos = self::construirFiltroGrupos($params);
 
         $sql = "SELECT p.id_personal,
-            (SELECT COUNT(*) 
-             FROM asignaciones_servicio a_count 
-             INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
-             WHERE a_count.id_personal = p.id_personal 
-             AND a_count.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
-             AND ts_count.nombre = 'TACTICO'
-            ) as veces_tactico
-        FROM bhr_personal p
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TACTICO')
-        WHERE p.tipo = 'ESPECIALISTA'
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            {$filtro_grupos}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio = :fecha_cuartelero
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-            )
-        ORDER BY 
-            veces_tactico ASC,
-            COALESCE(hr.dias_desde_ultimo, 999) DESC,
-            RAND()
-        LIMIT 1";
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_count 
+         INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
+         WHERE a_count.id_personal = p.id_personal 
+         AND a_count.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
+         AND ts_count.nombre = 'TACTICO'
+        ) as veces_tactico
+    FROM bhr_personal p
+    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TACTICO')
+    WHERE p.tipo = 'ESPECIALISTA'
+        AND p.activo = 1
+        AND cd.id_calendario IS NULL
+        {$filtro_grupos}
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+        )
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio = :fecha_cuartelero
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM comisiones_oficiales co
+            WHERE co.id_personal = p.id_personal
+            AND co.estado = 'ACTIVA'
+            AND :fecha_comision BETWEEN co.fecha_inicio AND co.fecha_fin
+        )
+        -- 🆕 CRÍTICO: NO puede tener RECONOCIMIENTO el mismo día
+        AND p.id_personal NOT IN (
+            SELECT a_eri.id_personal FROM asignaciones_servicio a_eri
+            INNER JOIN tipos_servicio ts_eri ON a_eri.id_tipo_servicio = ts_eri.id_tipo_servicio
+            WHERE a_eri.fecha_servicio = :fecha_eri
+            AND ts_eri.nombre = 'RECONOCIMIENTO'
+            AND a_eri.estado = 'PROGRAMADO'
+        )
+    ORDER BY 
+        veces_tactico ASC,
+        COALESCE(hr.dias_desde_ultimo, 999) DESC,
+        RAND()
+    LIMIT 1";
 
         $resultado = self::fetchFirst($sql, $params);
 
@@ -1621,11 +1648,10 @@ class AsignacionServicio extends ActiveRecord
      */
     private static function asignarTacticoTropa($fecha, $usuario_id, $id_oficial = null)
     {
-        // Calcular rango del ciclo
         $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
-                            FROM asignaciones_servicio 
-                            WHERE fecha_servicio <= :fecha 
-                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
+                        FROM asignaciones_servicio 
+                        WHERE fecha_servicio <= :fecha 
+                        AND DATEDIFF(:fecha, fecha_servicio) < 10";
 
         $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
         $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
@@ -1637,45 +1663,52 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_fin' => $fecha_fin_ciclo,
             ':fecha_inicio_count' => $fecha_inicio_ciclo,
             ':fecha_fin_count' => $fecha_fin_ciclo,
-            ':fecha_cuartelero' => $fecha
+            ':fecha_cuartelero' => $fecha,
+            ':fecha_comision' => $fecha
         ];
 
         $filtro_grupos = self::construirFiltroGrupos($params);
 
         $sql = "SELECT p.id_personal,
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_count 
-         INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
-         WHERE a_count.id_personal = p.id_personal 
-         AND a_count.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
-         AND ts_count.nombre = 'TACTICO TROPA'
-        ) as veces_tactico_tropa
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TACTICO TROPA')
-        WHERE p.tipo = 'TROPA'
-            AND g.nombre LIKE 'Sargento%'
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            {$filtro_grupos}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio = :fecha_cuartelero
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-            )
-        ORDER BY 
-            veces_tactico_tropa ASC,
-            COALESCE(hr.dias_desde_ultimo, 999) DESC,
-            RAND()
-        LIMIT 1";
+    (SELECT COUNT(*) 
+     FROM asignaciones_servicio a_count 
+     INNER JOIN tipos_servicio ts_count ON a_count.id_tipo_servicio = ts_count.id_tipo_servicio
+     WHERE a_count.id_personal = p.id_personal 
+     AND a_count.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
+     AND ts_count.nombre = 'TACTICO TROPA'
+    ) as veces_tactico_tropa
+    FROM bhr_personal p
+    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'TACTICO TROPA')
+    WHERE p.tipo = 'TROPA'
+        AND g.nombre LIKE 'Sargento%'
+        AND p.activo = 1
+        AND cd.id_calendario IS NULL
+        {$filtro_grupos}
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+        )
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio = :fecha_cuartelero
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM comisiones_oficiales co
+            WHERE co.id_personal = p.id_personal
+            AND co.estado = 'ACTIVA'
+            AND :fecha_comision BETWEEN co.fecha_inicio AND co.fecha_fin
+        )
+    ORDER BY 
+        veces_tactico_tropa ASC,
+        COALESCE(hr.dias_desde_ultimo, 999) DESC,
+        RAND()
+    LIMIT 1";
 
         $resultado = self::fetchFirst($sql, $params);
 
@@ -1721,11 +1754,10 @@ class AsignacionServicio extends ActiveRecord
             $logs[] = "⚠️ Solo hay {$especialistas_encontrados} especialistas, completando con SARGENTOS";
             $sargentos_necesarios = 2 - $especialistas_encontrados;
 
-            // Calcular rango del ciclo para sargentos
             $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
-                                FROM asignaciones_servicio 
-                                WHERE fecha_servicio <= :fecha 
-                                AND DATEDIFF(:fecha, fecha_servicio) < 10";
+                            FROM asignaciones_servicio 
+                            WHERE fecha_servicio <= :fecha 
+                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
 
             $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
             $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
@@ -1749,39 +1781,55 @@ class AsignacionServicio extends ActiveRecord
                 ':cantidad' => $sargentos_necesarios,
                 ':fecha_cuartelero' => $fecha,
                 ':fecha_inicio' => $fecha_inicio_ciclo,
-                ':fecha_fin' => $fecha_fin_ciclo
+                ':fecha_fin' => $fecha_fin_ciclo,
+                ':fecha_comision' => $fecha,
+                ':fecha_tactico' => $fecha  // 🆕 Para excluir quien tiene TACTICO
             ], $params_excluir);
 
             $filtro_grupos = self::construirFiltroGrupos($params_sargentos);
 
             $sargentos = self::fetchArray(
                 "SELECT p.id_personal, p.nombres, p.apellidos
-                 FROM bhr_personal p
-                 INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-                 LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-                    AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-                 WHERE p.tipo = 'TROPA'
-                    AND g.nombre LIKE 'Sargento%'
-                    AND p.activo = 1
-                    AND cd.id_calendario IS NULL
-                    {$filtro_grupos}
-                    {$filtro_excluir}
-                    AND p.id_personal NOT IN (
-                        SELECT id_personal FROM asignaciones_servicio 
-                        WHERE fecha_servicio = :fecha2
-                    )
-                    AND p.id_personal NOT IN (
-                        SELECT id_personal FROM asignaciones_servicio 
-                        WHERE fecha_servicio = :fecha_cuartelero
-                        AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-                    )
-                    AND p.id_personal NOT IN (
-                        SELECT id_personal FROM asignaciones_servicio 
-                        WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
-                        AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-                    )
-                 ORDER BY g.orden ASC, RAND()
-                 LIMIT :cantidad",
+             FROM bhr_personal p
+             INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+             LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+                AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+             WHERE p.tipo = 'TROPA'
+                AND g.nombre LIKE 'Sargento%'
+                AND p.activo = 1
+                AND cd.id_calendario IS NULL
+                {$filtro_grupos}
+                {$filtro_excluir}
+                AND p.id_personal NOT IN (
+                    SELECT id_personal FROM asignaciones_servicio 
+                    WHERE fecha_servicio = :fecha2
+                )
+                AND p.id_personal NOT IN (
+                    SELECT id_personal FROM asignaciones_servicio 
+                    WHERE fecha_servicio = :fecha_cuartelero
+                    AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+                )
+                AND p.id_personal NOT IN (
+                    SELECT id_personal FROM asignaciones_servicio 
+                    WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+                    AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM comisiones_oficiales co
+                    WHERE co.id_personal = p.id_personal
+                    AND co.estado = 'ACTIVA'
+                    AND :fecha_comision BETWEEN co.fecha_inicio AND co.fecha_fin
+                )
+                -- 🆕 CRÍTICO: NO puede tener TACTICO el mismo día
+                AND p.id_personal NOT IN (
+                    SELECT a_tac.id_personal FROM asignaciones_servicio a_tac
+                    INNER JOIN tipos_servicio ts_tac ON a_tac.id_tipo_servicio = ts_tac.id_tipo_servicio
+                    WHERE a_tac.fecha_servicio = :fecha_tactico
+                    AND ts_tac.nombre = 'TACTICO'
+                    AND a_tac.estado = 'PROGRAMADO'
+                )
+             ORDER BY g.orden ASC, RAND()
+             LIMIT :cantidad",
                 $params_sargentos
             );
 
@@ -1878,11 +1926,10 @@ class AsignacionServicio extends ActiveRecord
      */
     private static function asignarBanderin($fecha, $usuario_id, $id_oficial = null)
     {
-        // Calcular rango del ciclo
         $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
-                            FROM asignaciones_servicio 
-                            WHERE fecha_servicio <= :fecha 
-                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
+                        FROM asignaciones_servicio 
+                        WHERE fecha_servicio <= :fecha 
+                        AND DATEDIFF(:fecha, fecha_servicio) < 10";
 
         $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
         $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
@@ -1894,43 +1941,50 @@ class AsignacionServicio extends ActiveRecord
             ':fecha3' => $fecha,
             ':fecha_inicio' => $fecha_inicio_ciclo,
             ':fecha_fin' => $fecha_fin_ciclo,
-            ':fecha_cuartelero' => $fecha
+            ':fecha_cuartelero' => $fecha,
+            ':fecha_comision' => $fecha
         ];
 
         $filtro_grupos = self::construirFiltroGrupos($params);
 
         $sql = "SELECT p.id_personal
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
-        WHERE p.tipo = 'TROPA'
-            AND g.nombre LIKE 'Sargento%'
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            {$filtro_grupos}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
-            )
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio = :fecha_cuartelero
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-            )   
-        ORDER BY 
-            COALESCE(hr.dias_desde_ultimo, 999) DESC,
-            g.orden ASC,
-            RAND()
-        LIMIT 1";
+    FROM bhr_personal p
+    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
+    WHERE p.tipo = 'TROPA'
+        AND g.nombre LIKE 'Sargento%'
+        AND p.activo = 1
+        AND cd.id_calendario IS NULL
+        {$filtro_grupos}
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'BANDERÍN')
+        )
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+        )
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio = :fecha_cuartelero
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM comisiones_oficiales co
+            WHERE co.id_personal = p.id_personal
+            AND co.estado = 'ACTIVA'
+            AND :fecha_comision BETWEEN co.fecha_inicio AND co.fecha_fin
+        )
+    ORDER BY 
+        COALESCE(hr.dias_desde_ultimo, 999) DESC,
+        g.orden ASC,
+        RAND()
+    LIMIT 1";
 
         $resultado = self::fetchFirst($sql, $params);
 
@@ -1954,11 +2008,10 @@ class AsignacionServicio extends ActiveRecord
      */
     private static function asignarCuartelero($fecha, $usuario_id, $id_oficial = null)
     {
-        // Calcular rango del ciclo
         $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
-                            FROM asignaciones_servicio 
-                            WHERE fecha_servicio <= :fecha 
-                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
+                        FROM asignaciones_servicio 
+                        WHERE fecha_servicio <= :fecha 
+                        AND DATEDIFF(:fecha, fecha_servicio) < 10";
 
         $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
         $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
@@ -1972,56 +2025,63 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_inicio' => $fecha_inicio_ciclo,
             ':fecha_fin' => $fecha_fin_ciclo,
             ':fecha_inicio_count' => $fecha_inicio_ciclo,
-            ':fecha_fin_count' => $fecha_fin_ciclo
+            ':fecha_fin_count' => $fecha_fin_ciclo,
+            ':fecha_comision' => $fecha
         ];
 
         $filtro_grupos = self::construirFiltroGrupos($params);
 
         $sql = "SELECT p.id_personal,
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_cua
-         INNER JOIN tipos_servicio ts_cua ON a_cua.id_tipo_servicio = ts_cua.id_tipo_servicio
-         WHERE a_cua.id_personal = p.id_personal 
-         AND a_cua.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
-         AND ts_cua.nombre = 'CUARTELERO'
-        ) as veces_cuartelero_ciclo,
-        
-        COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
-        
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_dia
-         WHERE a_dia.id_personal = p.id_personal 
-         AND a_dia.fecha_servicio = :fecha_check
-        ) as servicios_ese_dia
-        
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-        WHERE p.tipo = 'TROPA'
-            AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            {$filtro_grupos}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-            )
-        ORDER BY 
-            servicios_ese_dia ASC,
-            veces_cuartelero_ciclo ASC,
-            dias_ultimo DESC,
-            g.orden ASC,
-            RAND()
-        LIMIT 1";
+    (SELECT COUNT(*) 
+     FROM asignaciones_servicio a_cua
+     INNER JOIN tipos_servicio ts_cua ON a_cua.id_tipo_servicio = ts_cua.id_tipo_servicio
+     WHERE a_cua.id_personal = p.id_personal 
+     AND a_cua.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
+     AND ts_cua.nombre = 'CUARTELERO'
+    ) as veces_cuartelero_ciclo,
+    
+    COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
+    
+    (SELECT COUNT(*) 
+     FROM asignaciones_servicio a_dia
+     WHERE a_dia.id_personal = p.id_personal 
+     AND a_dia.fecha_servicio = :fecha_check
+    ) as servicios_ese_dia
+    
+    FROM bhr_personal p
+    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+    WHERE p.tipo = 'TROPA'
+        AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
+        AND p.activo = 1
+        AND cd.id_calendario IS NULL
+        {$filtro_grupos}
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+        )
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN DATE_SUB(:fecha2, INTERVAL 2 DAY) AND DATE_SUB(:fecha3, INTERVAL 1 DAY)
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM comisiones_oficiales co
+            WHERE co.id_personal = p.id_personal
+            AND co.estado = 'ACTIVA'
+            AND :fecha_comision BETWEEN co.fecha_inicio AND co.fecha_fin
+        )
+    ORDER BY 
+        servicios_ese_dia ASC,
+        veces_cuartelero_ciclo ASC,
+        dias_ultimo DESC,
+        g.orden ASC,
+        RAND()
+    LIMIT 1";
 
         $resultado = self::fetchFirst($sql, $params);
 
@@ -2054,11 +2114,10 @@ class AsignacionServicio extends ActiveRecord
     {
         $asignaciones = [];
 
-        // Calcular rango del ciclo
         $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
-                            FROM asignaciones_servicio 
-                            WHERE fecha_servicio <= :fecha 
-                            AND DATEDIFF(:fecha, fecha_servicio) < 10";
+                        FROM asignaciones_servicio 
+                        WHERE fecha_servicio <= :fecha 
+                        AND DATEDIFF(:fecha, fecha_servicio) < 10";
 
         $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha' => $fecha]);
         $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
@@ -2076,71 +2135,78 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_fin_count' => $fecha_fin_ciclo,
             ':fecha_inicio_count2' => $fecha_inicio_ciclo,
             ':fecha_fin_count2' => $fecha_fin_ciclo,
-            ':fecha_cuartelero' => $fecha
+            ':fecha_cuartelero' => $fecha,
+            ':fecha_comision' => $fecha
         ];
 
         $filtro_grupos = self::construirFiltroGrupos($params);
 
         $sql = "SELECT 
-        p.id_personal,
-        p.nombres,
-        p.apellidos,
-        g.nombre as grado,
-        
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_noc
-         INNER JOIN tipos_servicio ts_noc ON a_noc.id_tipo_servicio = ts_noc.id_tipo_servicio
-         WHERE a_noc.id_personal = p.id_personal 
-         AND a_noc.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
-         AND ts_noc.nombre = 'SERVICIO NOCTURNO'
-        ) as nocturnos_ciclo,
-        
-        (SELECT DATEDIFF(:fecha_actual, MAX(a_last.fecha_servicio))
-         FROM asignaciones_servicio a_last
-         INNER JOIN tipos_servicio ts_last ON a_last.id_tipo_servicio = ts_last.id_tipo_servicio
-         WHERE a_last.id_personal = p.id_personal
-         AND ts_last.nombre = 'SERVICIO NOCTURNO'
-        ) as dias_ultimo_nocturno,
-        
-        (SELECT COUNT(*) 
-         FROM asignaciones_servicio a_total
-         WHERE a_total.id_personal = p.id_personal 
-         AND a_total.fecha_servicio BETWEEN :fecha_inicio_count2 AND :fecha_fin_count2
-        ) as servicios_ciclo_total,
-        
-        (SELECT GROUP_CONCAT(ts.nombre SEPARATOR ', ')
-         FROM asignaciones_servicio a_hoy
-         INNER JOIN tipos_servicio ts ON a_hoy.id_tipo_servicio = ts.id_tipo_servicio
-         WHERE a_hoy.id_personal = p.id_personal
-         AND a_hoy.fecha_servicio = :fecha_hoy
-        ) as servicios_hoy
-        
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        WHERE p.tipo = 'TROPA'
-            AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            {$filtro_grupos}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio = :fecha_cuartelero
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
-            )
-        ORDER BY 
-            nocturnos_ciclo ASC,
-            COALESCE(dias_ultimo_nocturno, 999) DESC,
-            servicios_ciclo_total ASC,
-            g.orden ASC,
-            RAND()
-        LIMIT 3";
+    p.id_personal,
+    p.nombres,
+    p.apellidos,
+    g.nombre as grado,
+    
+    (SELECT COUNT(*) 
+     FROM asignaciones_servicio a_noc
+     INNER JOIN tipos_servicio ts_noc ON a_noc.id_tipo_servicio = ts_noc.id_tipo_servicio
+     WHERE a_noc.id_personal = p.id_personal 
+     AND a_noc.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
+     AND ts_noc.nombre = 'SERVICIO NOCTURNO'
+    ) as nocturnos_ciclo,
+    
+    (SELECT DATEDIFF(:fecha_actual, MAX(a_last.fecha_servicio))
+     FROM asignaciones_servicio a_last
+     INNER JOIN tipos_servicio ts_last ON a_last.id_tipo_servicio = ts_last.id_tipo_servicio
+     WHERE a_last.id_personal = p.id_personal
+     AND ts_last.nombre = 'SERVICIO NOCTURNO'
+    ) as dias_ultimo_nocturno,
+    
+    (SELECT COUNT(*) 
+     FROM asignaciones_servicio a_total
+     WHERE a_total.id_personal = p.id_personal 
+     AND a_total.fecha_servicio BETWEEN :fecha_inicio_count2 AND :fecha_fin_count2
+    ) as servicios_ciclo_total,
+    
+    (SELECT GROUP_CONCAT(ts.nombre SEPARATOR ', ')
+     FROM asignaciones_servicio a_hoy
+     INNER JOIN tipos_servicio ts ON a_hoy.id_tipo_servicio = ts.id_tipo_servicio
+     WHERE a_hoy.id_personal = p.id_personal
+     AND a_hoy.fecha_servicio = :fecha_hoy
+    ) as servicios_hoy
+    
+    FROM bhr_personal p
+    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+    WHERE p.tipo = 'TROPA'
+        AND (g.nombre = 'Sargento 2do.' OR g.nombre LIKE 'Cabo%')
+        AND p.activo = 1
+        AND cd.id_calendario IS NULL
+        {$filtro_grupos}
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+        )
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio = :fecha_cuartelero
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'CUARTELERO')
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM comisiones_oficiales co
+            WHERE co.id_personal = p.id_personal
+            AND co.estado = 'ACTIVA'
+            AND :fecha_comision BETWEEN co.fecha_inicio AND co.fecha_fin
+        )
+    ORDER BY 
+        nocturnos_ciclo ASC,
+        COALESCE(dias_ultimo_nocturno, 999) DESC,
+        servicios_ciclo_total ASC,
+        g.orden ASC,
+        RAND()
+    LIMIT 3";
 
         $soldados = self::fetchArray($sql, $params);
 
@@ -2193,9 +2259,9 @@ class AsignacionServicio extends ActiveRecord
 
         // Calcular rango del ciclo
         $sql_inicio_ciclo = "SELECT MIN(fecha_servicio) as inicio 
-                            FROM asignaciones_servicio 
-                            WHERE fecha_servicio <= :fecha_temp 
-                            AND DATEDIFF(:fecha_temp, fecha_servicio) < 10";
+                        FROM asignaciones_servicio 
+                        WHERE fecha_servicio <= :fecha_temp 
+                        AND DATEDIFF(:fecha_temp, fecha_servicio) < 10";
 
         $ciclo = self::fetchFirst($sql_inicio_ciclo, [':fecha_temp' => $fecha]);
         $fecha_inicio_ciclo = ($ciclo && $ciclo['inicio']) ? $ciclo['inicio'] : $fecha;
@@ -2230,10 +2296,24 @@ class AsignacionServicio extends ActiveRecord
         $exclusion_sql = '';
         if ($fecha_exclusion && !$modo_emergencia) {
             $exclusion_sql = "AND p.id_personal NOT IN (
-            SELECT a2.id_personal FROM asignaciones_servicio a2
-            INNER JOIN tipos_servicio ts2 ON a2.id_tipo_servicio = ts2.id_tipo_servicio
-            WHERE a2.fecha_servicio = :fecha_exclusion
-            AND ts2.nombre = 'SERVICIO NOCTURNO'
+        SELECT a2.id_personal FROM asignaciones_servicio a2
+        INNER JOIN tipos_servicio ts2 ON a2.id_tipo_servicio = ts2.id_tipo_servicio
+        WHERE a2.fecha_servicio = :fecha_exclusion
+        AND ts2.nombre = 'SERVICIO NOCTURNO'
+    )";
+        }
+
+        // 🆕 FILTRO CRÍTICO: TACTICO y RECONOCIMIENTO no pueden estar juntos
+        $filtro_tactico_eri = '';
+
+        if ($nombre_servicio === 'RECONOCIMIENTO') {
+            $filtro_tactico_eri = "
+        AND p.id_personal NOT IN (
+            SELECT a_tac.id_personal FROM asignaciones_servicio a_tac
+            INNER JOIN tipos_servicio ts_tac ON a_tac.id_tipo_servicio = ts_tac.id_tipo_servicio
+            WHERE a_tac.fecha_servicio = :fecha_tactico_check
+            AND ts_tac.nombre = 'TACTICO'
+            AND a_tac.estado = 'PROGRAMADO'
         )";
         }
 
@@ -2250,7 +2330,9 @@ class AsignacionServicio extends ActiveRecord
             ':fecha_inicio_count' => $fecha_inicio_ciclo,
             ':fecha_fin_count' => $fecha_fin_ciclo,
             ':fecha_inicio_count2' => $fecha_inicio_ciclo,
-            ':fecha_fin_count2' => $fecha_fin_ciclo
+            ':fecha_fin_count2' => $fecha_fin_ciclo,
+            ':fecha_comision' => $fecha,
+            ':fecha_tactico_check' => $fecha  // 🆕 Para el filtro TACTICO/ERI
         ];
 
         // Construir filtro de grupos
@@ -2264,57 +2346,64 @@ class AsignacionServicio extends ActiveRecord
         }
 
         $sql = "SELECT p.id_personal,
-            p.nombres,
-            p.apellidos,
-            g.nombre as grado,
-            
-            (SELECT COUNT(*) 
-             FROM asignaciones_servicio a_count 
-             WHERE a_count.id_personal = p.id_personal 
-             AND a_count.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
-            ) as servicios_ciclo_total,
-            
-            (SELECT COUNT(*) 
-             FROM asignaciones_servicio a_count2
-             INNER JOIN tipos_servicio ts_count ON a_count2.id_tipo_servicio = ts_count.id_tipo_servicio
-             WHERE a_count2.id_personal = p.id_personal 
-             AND a_count2.fecha_servicio BETWEEN :fecha_inicio_count2 AND :fecha_fin_count2
-             AND ts_count.nombre = :servicio3
-            ) as veces_este_servicio,
-            
-            COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
-            COALESCE(hr.prioridad, 0) as prioridad_hist
-            
-        FROM bhr_personal p
-        INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
-        LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
-            AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
-        LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
-            AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = :servicio)
-        LEFT JOIN exclusiones_servicio ex ON p.id_personal = ex.id_personal
-            AND ex.fecha_exclusion = :fecha2
-            AND ex.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = :servicio2)
-        WHERE p.tipo = :tipo
-            AND p.activo = 1
-            AND cd.id_calendario IS NULL
-            AND ex.id_exclusion IS NULL
-            {$filtro_grupos}
-            {$filtro_grados}
-            {$filtro_excluir_ids}
-            AND p.id_personal NOT IN (
-                SELECT id_personal FROM asignaciones_servicio 
-                WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
-                AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
-            )
-            {$exclusion_sql}
-        ORDER BY 
-            servicios_ciclo_total ASC,
-            veces_este_servicio ASC,
-            dias_ultimo DESC,
-            prioridad_hist ASC,
-            g.orden ASC,
-            RAND()
-        LIMIT :cantidad";
+        p.nombres,
+        p.apellidos,
+        g.nombre as grado,
+        
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_count 
+         WHERE a_count.id_personal = p.id_personal 
+         AND a_count.fecha_servicio BETWEEN :fecha_inicio_count AND :fecha_fin_count
+        ) as servicios_ciclo_total,
+        
+        (SELECT COUNT(*) 
+         FROM asignaciones_servicio a_count2
+         INNER JOIN tipos_servicio ts_count ON a_count2.id_tipo_servicio = ts_count.id_tipo_servicio
+         WHERE a_count2.id_personal = p.id_personal 
+         AND a_count2.fecha_servicio BETWEEN :fecha_inicio_count2 AND :fecha_fin_count2
+         AND ts_count.nombre = :servicio3
+        ) as veces_este_servicio,
+        
+        COALESCE(hr.dias_desde_ultimo, 999) as dias_ultimo,
+        COALESCE(hr.prioridad, 0) as prioridad_hist
+        
+    FROM bhr_personal p
+    INNER JOIN bhr_grados g ON p.id_grado = g.id_grado
+    LEFT JOIN calendario_descansos cd ON p.id_grupo_descanso = cd.id_grupo_descanso
+        AND :fecha BETWEEN cd.fecha_inicio AND cd.fecha_fin
+    LEFT JOIN historial_rotaciones hr ON p.id_personal = hr.id_personal 
+        AND hr.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = :servicio)
+    LEFT JOIN exclusiones_servicio ex ON p.id_personal = ex.id_personal
+        AND ex.fecha_exclusion = :fecha2
+        AND ex.id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = :servicio2)
+    WHERE p.tipo = :tipo
+        AND p.activo = 1
+        AND cd.id_calendario IS NULL
+        AND ex.id_exclusion IS NULL
+        {$filtro_grupos}
+        {$filtro_grados}
+        {$filtro_excluir_ids}
+        AND p.id_personal NOT IN (
+            SELECT id_personal FROM asignaciones_servicio 
+            WHERE fecha_servicio BETWEEN :fecha_inicio AND :fecha_fin
+            AND id_tipo_servicio = (SELECT id_tipo_servicio FROM tipos_servicio WHERE nombre = 'Semana')
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM comisiones_oficiales co
+            WHERE co.id_personal = p.id_personal
+            AND co.estado = 'ACTIVA'
+            AND :fecha_comision BETWEEN co.fecha_inicio AND co.fecha_fin
+        )
+        {$filtro_tactico_eri}
+        {$exclusion_sql}
+    ORDER BY 
+        servicios_ciclo_total ASC,
+        veces_este_servicio ASC,
+        dias_ultimo DESC,
+        prioridad_hist ASC,
+        g.orden ASC,
+        RAND()
+    LIMIT :cantidad";
 
         if ($modo_emergencia) {
             error_log("🚨 MODO EMERGENCIA ACTIVADO para {$nombre_servicio}");
@@ -2350,7 +2439,6 @@ class AsignacionServicio extends ActiveRecord
 
         return $personal;
     }
-
     // ========================================
     // FUNCIONES AUXILIARES
     // ========================================
