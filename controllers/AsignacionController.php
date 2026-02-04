@@ -875,6 +875,9 @@ class AsignacionController
     /**
      * 🆕 API: Registrar comisión oficial
      */
+    /**
+     * 🆕 API: Registrar comisión oficial (versión con asignación manual)
+     */
     public static function registrarComisionAPI()
     {
         header('Content-Type: application/json; charset=UTF-8');
@@ -888,8 +891,7 @@ class AsignacionController
             $destino = $_POST['destino'] ?? 'Ciudad Capital';
             $motivo = $_POST['motivo'] ?? '';
 
-            // 🔥 AQUÍ ESTÁ EL PROBLEMA - ARREGLADO:
-            $usuario_id = $_SESSION['user_id'] ?? $_SESSION['id'] ?? 1; // ✅ Default a 1 si no hay sesión
+            $usuario_id = $_SESSION['user_id'] ?? $_SESSION['id'] ?? 1;
 
             ob_clean();
 
@@ -902,16 +904,6 @@ class AsignacionController
                 ], JSON_UNESCAPED_UNICODE);
                 return;
             }
-
-            // 🔍 DEBUG - Ver qué usuario se está enviando
-            error_log("👤 Usuario que registra: {$usuario_id}");
-            error_log("📋 Datos a insertar: " . json_encode([
-                'id_personal' => $id_personal,
-                'fecha_inicio' => $fecha_inicio,
-                'fecha_fin' => $fecha_fin,
-                'numero_oficio' => $numero_oficio,
-                'created_by' => $usuario_id
-            ]));
 
             // Validar formato de fechas
             if (
@@ -943,7 +935,7 @@ class AsignacionController
                 'destino' => $destino,
                 'numero_oficio' => $numero_oficio,
                 'motivo' => $motivo,
-                'created_by' => $usuario_id // ✅ Ahora siempre tiene un valor
+                'created_by' => $usuario_id
             ]);
 
             ob_end_clean();
@@ -953,7 +945,8 @@ class AsignacionController
                 echo json_encode([
                     'codigo' => 1,
                     'mensaje' => $resultado['mensaje'],
-                    'data' => $resultado['data']
+                    'data' => $resultado['data'],
+                    'requiere_asignacion_manual' => !empty($resultado['data']['servicios_pendientes_reemplazo'])
                 ], JSON_UNESCAPED_UNICODE);
             } else {
                 http_response_code(400);
@@ -976,6 +969,122 @@ class AsignacionController
         }
     }
 
+
+    /**
+     * 🆕 API: Confirmar reemplazos seleccionados manualmente
+     */
+    public static function confirmarReemplazosAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $json = file_get_contents('php://input');
+            $data = json_decode($json, true);
+
+            $reemplazos = $data['reemplazos'] ?? [];
+            $id_comision = $data['id_comision'] ?? null;
+            $usuario_id = $_SESSION['user_id'] ?? $_SESSION['id'] ?? 1;
+
+            if (empty($reemplazos) || !$id_comision) {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => 'Datos incompletos'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            $resultado = AsignacionServicio::confirmarReemplazos($reemplazos, $id_comision, $usuario_id);
+
+            if ($resultado['exito']) {
+                http_response_code(200);
+                echo json_encode([
+                    'codigo' => 1,
+                    'mensaje' => $resultado['mensaje'],
+                    'data' => [
+                        'confirmados' => $resultado['confirmados'],
+                        'errores' => $resultado['errores'],
+                        'detalles' => $resultado['detalles_confirmados']
+                    ]
+                ], JSON_UNESCAPED_UNICODE);
+            } else {
+                http_response_code(400);
+                echo json_encode([
+                    'codigo' => 0,
+                    'mensaje' => $resultado['mensaje']
+                ], JSON_UNESCAPED_UNICODE);
+            }
+        } catch (\Exception $e) {
+            error_log("❌ ERROR en confirmarReemplazosAPI: " . $e->getMessage());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error: ' . $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+
+
+
+    /**
+     * 🆕 API: Recalcular TODO el historial de rotaciones
+     */
+    public static function recalcularHistorialAPI()
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            error_log("🔄 === RECALCULANDO TODO EL HISTORIAL ===");
+
+            // Obtener todo el personal activo
+            $todo_personal = AsignacionServicio::fetchArray(
+                "SELECT id_personal, CONCAT(nombres, ' ', apellidos) as nombre 
+             FROM bhr_personal 
+             WHERE activo = 1",
+                []
+            );
+
+            $recalculados = 0;
+            $errores = 0;
+
+            foreach ($todo_personal as $persona) {
+                error_log("   Procesando: {$persona['nombre']} (ID: {$persona['id_personal']})");
+
+                if (AsignacionServicio::recalcularHistorialPersona($persona['id_personal'])) {
+                    $recalculados++;
+                } else {
+                    $errores++;
+                }
+            }
+
+            // Actualizar días desde último servicio
+            AsignacionServicio::actualizarDiasDesdeUltimo();
+
+            error_log("🎉 RECÁLCULO COMPLETADO");
+            error_log("   ✅ Exitosos: {$recalculados}");
+            error_log("   ❌ Errores: {$errores}");
+
+            http_response_code(200);
+            echo json_encode([
+                'codigo' => 1,
+                'mensaje' => "Historial recalculado exitosamente",
+                'personas_actualizadas' => $recalculados,
+                'errores' => $errores,
+                'total_personal' => count($todo_personal)
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (\Exception $e) {
+            error_log("❌ ERROR FATAL: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
+
+            http_response_code(500);
+            echo json_encode([
+                'codigo' => 0,
+                'mensaje' => 'Error al recalcular historial: ' . $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
     /**
      * 🆕 API: Obtener servicios afectados por rango de fechas
      */

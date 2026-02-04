@@ -41,6 +41,10 @@ $router->get('/API/asignaciones/comisiones-activas', [AsignacionController::clas
 $router->get('/API/asignaciones/personal-con-compensacion', [AsignacionController::class, 'personalConCompensacionAPI']);
 
 
+$router->post('/API/asignaciones/confirmar-reemplazos', [AsignacionController::class, 'confirmarReemplazosAPI']);
+// En la sección de asignaciones
+$router->post('/api/asignaciones/recalcular-historial', [AsignacionController::class, 'recalcularHistorialAPI']);
+
 
 
 // ========================================

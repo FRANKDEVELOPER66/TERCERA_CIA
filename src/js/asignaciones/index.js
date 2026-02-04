@@ -451,26 +451,31 @@ const gestionarBotones = (contexto) => {
             btnConsultar.style.display = '';
             estadoVista = 'seleccion';
             break;
+
         case 'semana_nueva':
             btnGenerar.style.display = '';
             estadoVista = 'seleccion';
             break;
+
         case 'consultando':
             btnExportarPDF.style.display = '';
+            btnEliminarSemana.style.display = '';  // ✅ AGREGADO: Ahora siempre visible al consultar
             btnRegresar.style.display = '';
             estadoVista = 'consultando';
             break;
+
         case 'generado_nuevo':
             btnExportarPDF.style.display = '';
             btnEliminarSemana.style.display = '';
             btnRegresar.style.display = '';
             estadoVista = 'generando';
             break;
+
         case 'inicial':
             estadoVista = 'seleccion';
             break;
+
         case 'fecha_ocupada':
-            // No mostrar ningún botón de acción
             estadoVista = 'seleccion';
             break;
     }
@@ -1555,9 +1560,6 @@ const registrarComision = async () => {
         motivo: document.getElementById('motivoComision')?.value
     };
 
-    // 🔍 DEBUG - Ver qué se está enviando
-    console.log('📤 Datos a enviar:', datos);
-
     // Validaciones
     if (!datos.id_personal || !datos.fecha_inicio || !datos.fecha_fin || !datos.numero_oficio) {
         Swal.fire({
@@ -1565,17 +1567,6 @@ const registrarComision = async () => {
             title: 'Datos incompletos',
             text: 'Complete todos los campos obligatorios marcados con *',
             confirmButtonColor: '#f39c12'
-        });
-        return;
-    }
-
-    // 🔍 Verificar que el ID sea un número válido
-    if (isNaN(parseInt(datos.id_personal))) {
-        Swal.fire({
-            icon: 'error',
-            title: 'Personal inválido',
-            text: 'Debe seleccionar un personal válido',
-            confirmButtonColor: '#e74c3c'
         });
         return;
     }
@@ -1593,7 +1584,7 @@ const registrarComision = async () => {
                 <hr>
                 <p class="text-warning mb-0">
                     <i class="bi bi-info-circle"></i> 
-                    El sistema buscará reemplazos automáticamente siguiendo criterios de equidad.
+                    Los servicios afectados quedarán pendientes para asignación manual.
                 </p>
             </div>
         `,
@@ -1628,19 +1619,21 @@ const registrarComision = async () => {
                 modalComisionBS.hide();
             }
 
-            // Mostrar resultado detallado
-            await Swal.fire({
-                icon: 'success',
-                title: '✅ Comisión Registrada',
-                html: generarHTMLResultado(data.data),
-                confirmButtonText: 'Entendido',
-                confirmButtonColor: '#27ae60',
-                width: '600px'
-            });
+            // ✅ Si requiere asignación manual, mostrar modal
+            if (data.requiere_asignacion_manual && data.data.servicios_pendientes_reemplazo.length > 0) {
+                mostrarModalAsignacionManual(data.data);
+            } else {
+                await Swal.fire({
+                    icon: 'success',
+                    title: '✅ Comisión Registrada',
+                    text: data.mensaje,
+                    confirmButtonColor: '#27ae60'
+                });
 
-            // Recargar vista si está consultando servicios
-            if (typeof consultarServicios === 'function') {
-                consultarServicios();
+                // Recargar vista
+                if (typeof consultarServicios === 'function') {
+                    consultarServicios();
+                }
             }
         } else {
             Swal.fire({
@@ -1657,6 +1650,222 @@ const registrarComision = async () => {
             icon: 'error',
             title: 'Error',
             text: 'Error al registrar comisión: ' + error.message,
+            confirmButtonColor: '#e74c3c'
+        });
+    }
+};
+
+
+const mostrarModalAsignacionManual = (dataComision) => {
+    let html = `
+        <div class="modal fade" id="modalAsignacionManual" tabindex="-1" data-bs-backdrop="static">
+            <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header" style="background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); color: white;">
+                        <h5 class="modal-title">
+                            <i class="bi bi-exclamation-triangle-fill"></i>
+                            Asignar Reemplazos Manualmente
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info mb-4">
+                            <strong><i class="bi bi-info-circle"></i> Comisión ${dataComision.numero_oficio}</strong>
+                            <br>
+                            ${dataComision.servicios_afectados} servicios requieren reemplazo
+                            <br>
+                            <small class="text-muted">
+                                Los candidatos están ordenados por: días sin hacer este servicio, 
+                                carga actual y veces que ha sido reemplazo
+                            </small>
+                        </div>
+    `;
+
+    dataComision.servicios_pendientes_reemplazo.forEach((servicio, index) => {
+        html += `
+            <div class="card mb-3 shadow-sm">
+                <div class="card-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong><i class="bi bi-calendar-event"></i> ${formatearFecha(servicio.fecha)}</strong>
+                            <br>
+                            <small>${servicio.servicio} (${servicio.hora_inicio?.substring(0, 5)} - ${servicio.hora_fin?.substring(0, 5)})</small>
+                        </div>
+                        <span class="badge bg-light text-dark">${servicio.candidatos.length} candidatos</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <label class="form-label fw-bold">
+                        <i class="bi bi-person-check"></i> Seleccionar reemplazo:
+                    </label>
+                    <select 
+                        class="form-select form-select-lg select-reemplazo" 
+                        id="reemplazo_${servicio.id_asignacion}" 
+                        data-asignacion="${servicio.id_asignacion}"
+                        data-servicio="${servicio.servicio}"
+                        required
+                    >
+                        <option value="">-- Seleccione un candidato --</option>
+        `;
+
+        servicio.candidatos.forEach((candidato, idx) => {
+            const badge = idx === 0 ? '⭐ ' : '';
+            const prioridad = candidato.compensaciones_pendientes > 0 ? '🎁 ' : '';
+
+            html += `
+                <option value="${candidato.id_personal}">
+                    ${badge}${prioridad}${candidato.grado} ${candidato.nombre_completo} 
+                    → ${candidato.dias_desde_ultimo_servicio} días sin este servicio | 
+                    ${candidato.servicios_en_ciclo} servicios en ciclo | 
+                    ${candidato.veces_reemplazo} reemplazos
+                    ${candidato.compensaciones_pendientes > 0 ? ' | ⭐ ' + candidato.compensaciones_pendientes + ' compensaciones' : ''}
+                </option>
+            `;
+        });
+
+        html += `
+                    </select>
+                    ${servicio.candidatos.length === 0 ?
+                '<div class="alert alert-danger mt-2"><i class="bi bi-exclamation-triangle"></i> No hay candidatos disponibles para este servicio</div>'
+                : ''}
+                </div>
+            </div>
+        `;
+    });
+
+    html += `
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                            <i class="bi bi-x-circle"></i> Cancelar
+                        </button>
+                        <button type="button" class="btn btn-success btn-lg" onclick="confirmarReemplazos(${dataComision.id_comision})">
+                            <i class="bi bi-check-circle-fill"></i> Confirmar Reemplazos
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Agregar al DOM
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    document.body.appendChild(container);
+
+    // Mostrar modal
+    const modalElement = document.getElementById('modalAsignacionManual');
+    const modal = new bootstrap.Modal(modalElement);
+
+    // Limpiar al cerrar
+    modalElement.addEventListener('hidden.bs.modal', () => {
+        container.remove();
+    });
+
+    modal.show();
+};
+
+
+window.confirmarReemplazos = async (idComision) => {
+    const selects = document.querySelectorAll('.select-reemplazo');
+    const reemplazos = [];
+    let faltantes = [];
+
+    selects.forEach(select => {
+        const idAsignacion = select.dataset.asignacion;
+        const nombreServicio = select.dataset.servicio;
+        const idPersonalReemplazo = select.value;
+
+        if (!idPersonalReemplazo) {
+            faltantes.push(nombreServicio);
+        } else {
+            reemplazos.push({
+                id_asignacion: parseInt(idAsignacion),
+                id_personal_reemplazo: parseInt(idPersonalReemplazo)
+            });
+        }
+    });
+
+    if (faltantes.length > 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Faltan reemplazos',
+            html: `Debe seleccionar reemplazo para:<br><br><strong>${faltantes.join('<br>')}</strong>`,
+            confirmButtonColor: '#f39c12'
+        });
+        return;
+    }
+
+    const confirmacion = await Swal.fire({
+        icon: 'question',
+        title: '¿Confirmar reemplazos?',
+        html: `
+            <p>Se asignarán <strong>${reemplazos.length} reemplazos</strong></p>
+            <p class="text-muted">Los reemplazantes recibirán compensación automáticamente</p>
+        `,
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-check-circle"></i> Confirmar',
+        cancelButtonText: 'Revisar',
+        confirmButtonColor: '#27ae60'
+    });
+
+    if (!confirmacion.isConfirmed) return;
+
+    try {
+        mostrarLoading(true);
+
+        const response = await fetch('/TERCERA_CIA/API/asignaciones/confirmar-reemplazos', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                reemplazos: reemplazos,
+                id_comision: idComision
+            })
+        });
+
+        const data = await response.json();
+
+        mostrarLoading(false);
+
+        if (data.codigo === 1) {
+            // Cerrar modal
+            const modalElement = document.getElementById('modalAsignacionManual');
+            const modal = bootstrap.Modal.getInstance(modalElement);
+            if (modal) {
+                modal.hide();
+            }
+
+            await Swal.fire({
+                icon: 'success',
+                title: '✅ Reemplazos Confirmados',
+                html: `
+                    <p><strong>${data.data.confirmados}</strong> reemplazos asignados exitosamente</p>
+                    ${data.data.errores > 0 ? `<p class="text-warning">${data.data.errores} no pudieron ser asignados</p>` : ''}
+                `,
+                confirmButtonColor: '#27ae60'
+            });
+
+            // Recargar vista
+            if (typeof consultarServicios === 'function') {
+                consultarServicios();
+            }
+        } else {
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: data.mensaje,
+                confirmButtonColor: '#e74c3c'
+            });
+        }
+    } catch (error) {
+        mostrarLoading(false);
+        console.error('Error:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'Error',
+            text: 'Error al confirmar reemplazos: ' + error.message,
             confirmButtonColor: '#e74c3c'
         });
     }
